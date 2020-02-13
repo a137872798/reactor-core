@@ -28,6 +28,7 @@ import reactor.core.Scannable;
  * Use the dispose() to release the wrapped worker.
  * This scheduler is time-capable if the worker itself is time-capable (can schedule with
  * a delay and/or periodically).
+ * 调用createWorker 始终返回一个对象
  */
 final class SingleWorkerScheduler implements Scheduler, Executor, Scannable {
 

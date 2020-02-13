@@ -34,6 +34,7 @@ import reactor.util.annotation.Nullable;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 内部包含一组 pub 对象
  */
 final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 
@@ -132,6 +133,7 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 			return;
 		}
 
+		// 跟 combineLaster 类似的套路 创建一个 协调对象
 		RaceCoordinator<T> coordinator = new RaceCoordinator<>(n);
 
 		coordinator.subscribe(a, n, actual);
@@ -166,11 +168,21 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 		return null; //no particular key to be represented, still useful in hooks
 	}
 
+	/**
+	 * 竞争协调对象
+	 * @param <T>
+	 */
 	static final class RaceCoordinator<T>
 			implements Subscription, Scannable {
 
+		/**
+		 * 上游每个 pub 会对应下面一个 sub
+		 */
 		final FirstEmittingSubscriber<T>[] subscribers;
 
+		/**
+		 * 该对象是否已经被关闭
+		 */
 		volatile boolean cancelled;
 
 		volatile int wip;
@@ -178,6 +190,10 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 		static final AtomicIntegerFieldUpdater<RaceCoordinator> WIP =
 				AtomicIntegerFieldUpdater.newUpdater(RaceCoordinator.class, "wip");
 
+		/**
+		 * 根据 pub 数量来创建 subscriber
+		 * @param n
+		 */
 		@SuppressWarnings("unchecked")
 		RaceCoordinator(int n) {
 			subscribers = new FirstEmittingSubscriber[n];
@@ -197,15 +213,23 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 			return null;
 		}
 
+		/**
+		 * 将 上游的一组 pub 数据 发往下游
+		 * @param sources
+		 * @param n
+		 * @param actual
+		 */
 		void subscribe(Publisher<? extends T>[] sources,
 				int n,
 				CoreSubscriber<? super T> actual) {
 			FirstEmittingSubscriber<T>[] a = subscribers;
 
+			// 将订阅者包装  onNext onComplete 等 会转发到 协调对象上
 			for (int i = 0; i < n; i++) {
 				a[i] = new FirstEmittingSubscriber<>(actual, this, i);
 			}
 
+			// 触发本对象的 request
 			actual.onSubscribe(this);
 
 			for (int i = 0; i < n; i++) {
@@ -227,6 +251,10 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 
 		}
 
+		/**
+		 * 代表 订阅者尝试从该对象中拉取数据
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
@@ -235,6 +263,7 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 					subscribers[w].request(n);
 				}
 				else {
+					// 挨个触发 request 竞争成功的 对象将允许向下游发送数据
 					for (FirstEmittingSubscriber<T> s : subscribers) {
 						s.request(n);
 					}
@@ -260,6 +289,11 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 			}
 		}
 
+		/**
+		 * 竞争
+		 * @param index
+		 * @return
+		 */
 		boolean tryWin(int index) {
 			if (wip == Integer.MIN_VALUE) {
 				if (WIP.compareAndSet(this, Integer.MIN_VALUE, index)) {
@@ -267,6 +301,7 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 					FirstEmittingSubscriber<T>[] a = subscribers;
 					int n = a.length;
 
+					// 竞争成功情况下 关闭其他subscription
 					for (int i = 0; i < n; i++) {
 						if (i != index) {
 							a[i].cancel();
@@ -280,9 +315,16 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 		}
 	}
 
+	/**
+	 * 该对象用于将请求转发到协调对象上
+	 * @param <T>
+	 */
 	static final class FirstEmittingSubscriber<T> extends Operators.DeferredSubscription
 			implements InnerOperator<T, T> {
 
+		/**
+		 * 协调对象
+		 */
 		final RaceCoordinator<T> parent;
 
 		final CoreSubscriber<? super T> actual;
@@ -318,6 +360,10 @@ final class FluxFirstEmitting<T> extends Flux<T> implements SourceProducer<T> {
 			return actual;
 		}
 
+		/**
+		 * 竞争成功的 情况下 允许触发真正的 sub(actual)
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (won) {

@@ -29,6 +29,7 @@ import reactor.util.annotation.Nullable;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 将异常包装成 Flux 对象  调用 request() 时 抛出异常   (相当于异常是延迟触发的)
  */
 final class FluxErrorOnRequest<T> extends Flux<T> implements SourceProducer<T> {
 
@@ -54,6 +55,7 @@ final class FluxErrorOnRequest<T> extends Flux<T> implements SourceProducer<T> {
 
 		final Throwable error;
 
+		// 该变量使用 volatile 修饰
 		volatile int once;
 		static final AtomicIntegerFieldUpdater<ErrorSubscription> ONCE =
 				AtomicIntegerFieldUpdater.newUpdater(ErrorSubscription.class, "once");

@@ -116,6 +116,7 @@ interface OnNextFailureStrategy extends BiFunction<Throwable, Object, Throwable>
 	 * @param errorConsumer the {@link BiConsumer<Throwable, Object>} to process the recovered errors with.
 	 * It must deal with potential {@code null}s.
 	 * @return a new {@link OnNextFailureStrategy} that allows resuming the sequence.
+	 * 该方法 用于当onNext 发生异常时 用于恢复的函数
 	 */
 	static OnNextFailureStrategy resume(BiConsumer<Throwable, Object> errorConsumer) {
 		return new ResumeStrategy(null, errorConsumer);
@@ -161,6 +162,9 @@ interface OnNextFailureStrategy extends BiFunction<Throwable, Object, Throwable>
 
 	OnNextFailureStrategy RESUME_DROP = new ResumeDropStrategy(null);
 
+	/**
+	 * 当 onNext 出现异常时 执行的函数
+	 */
 	final class ResumeStrategy implements OnNextFailureStrategy {
 
 		final Predicate<Throwable>  errorPredicate;
@@ -172,11 +176,24 @@ interface OnNextFailureStrategy extends BiFunction<Throwable, Object, Throwable>
 			this.errorConsumer = errorConsumer;
 		}
 
+		/**
+		 * 判断是否满足处理条件
+		 * @param error
+		 * @param value
+		 * @return
+		 */
 		@Override
 		public boolean test(Throwable error, @Nullable Object value) {
 			return errorPredicate == null || errorPredicate.test(error);
 		}
 
+		/**
+		 * 使用该 对象处理异常
+		 * @param error the error being recovered from.
+		 * @param value the value causing the error, null if not applicable.
+		 * @param context the {@link Context} associated with the recovering sequence.
+		 * @return
+		 */
 		@Override
 		@Nullable
 		public Throwable process(Throwable error, @Nullable Object value, Context context) {
@@ -188,6 +205,7 @@ interface OnNextFailureStrategy extends BiFunction<Throwable, Object, Throwable>
 				return error;
 			}
 			try {
+				// 这里消化掉了异常 返回null
 				errorConsumer.accept(error, value);
 				return null;
 			}

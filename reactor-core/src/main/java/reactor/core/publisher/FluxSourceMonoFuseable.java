@@ -20,6 +20,7 @@ import reactor.core.Fuseable;
 
 /**
  * @author Stephane Maldini
+ * 适配 Mono 和 Flux
  */
 final class FluxSourceMonoFuseable<I> extends FluxFromMonoOperator<I, I> implements Fuseable {
 

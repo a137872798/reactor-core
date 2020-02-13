@@ -109,6 +109,7 @@ import reactor.util.function.Tuples;
  * @author Simon Baslé
  *
  * @see Mono
+ * 代表该数据源内部有多个元素
  */
 public abstract class Flux<T> implements CorePublisher<T> {
 
@@ -133,6 +134,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <V> The produced output after transformation by the given combinator
 	 *
 	 * @return a {@link Flux} based on the produced combinations
+	 * 将多个数据源 通过 结合函数 整合成一个数据源
 	 */
 	@SafeVarargs
 	public static <T, V> Flux<V> combineLatest(Function<Object[], V> combinator, Publisher<? extends T>... sources) {
@@ -161,20 +163,24 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	@SafeVarargs
 	public static <T, V> Flux<V> combineLatest(Function<Object[], V> combinator, int prefetch,
 			Publisher<? extends T>... sources) {
+		// 如果数据源列表为空 返回一个空的 Flux
 		if (sources.length == 0) {
 			return empty();
 		}
 
 		if (sources.length == 1) {
             Publisher<? extends T> source = sources[0];
+            // 如果该数据源 支持聚合操作  Fuseable 本身是一个标记用接口
             if (source instanceof Fuseable) {
 	            return onAssembly(new FluxMapFuseable<>(from(source),
 			            v -> combinator.apply(new Object[]{v})));
             }
+            // from 代表将 source 包装成 Flux 第二个参数是 mapper 将 T 转化成 R 类型
 			return onAssembly(new FluxMap<>(from(source),
 					v -> combinator.apply(new Object[]{v})));
 		}
 
+		// 将 一组 sources 作为数组 并使用 combinator 进行聚合后 包装成flux 对象
 		return onAssembly(new FluxCombineLatest<>(sources,
 				combinator, Queues.get(prefetch), prefetch));
 	}
@@ -408,6 +414,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> The type of values in both source and output sequences
 	 *
 	 * @return a new {@link Flux} concatenating all source sequences
+	 * 合并多个 source
 	 */
 	public static <T> Flux<T> concat(Iterable<? extends Publisher<? extends T>> sources) {
 		return onAssembly(new FluxConcatIterable<>(sources));
@@ -421,6 +428,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param values The values to concatenate
 	 *
 	 * @return a new {@link Flux} concatenating all source sequences
+	 * 以该对象为基础 连接上 另一个 整个 values 生成的 flux 对象
 	 */
 	@SafeVarargs
 	public final Flux<T> concatWithValues(T... values) {
@@ -514,6 +522,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> The type of values in both source and output sequences
 	 *
 	 * @return a new {@link Flux} concatenating all inner sources sequences, delaying errors
+	 * 合并成一个 当延时会报错的 flux
 	 */
 	public static <T> Flux<T> concatDelayError(Publisher<? extends Publisher<? extends T>> sources) {
 		return concatDelayError(sources, Queues.XS_BUFFER_SIZE);
@@ -641,6 +650,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param emitter Consume the {@link FluxSink} provided per-subscriber by Reactor to generate signals.
 	 * @return a {@link Flux}
 	 * @see #push(Consumer)
+	 * 通过一个 消费者函数来初始化 flux 对象
 	 */
     public static <T> Flux<T> create(Consumer<? super FluxSink<T>> emitter) {
 	    return create(emitter, OverflowStrategy.BUFFER);
@@ -689,6 +699,9 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param emitter Consume the {@link FluxSink} provided per-subscriber by Reactor to generate signals.
 	 * @return a {@link Flux}
 	 * @see #push(Consumer, reactor.core.publisher.FluxSink.OverflowStrategy)
+	 * 通过一个消费者对象来初始化 flux  相当于一种泛化模式  一般情况下  request 方法是通过 subscription 向 pub 拉取数据
+	 * 这里使用一个 消费者充当request 的处理对象
+	 * 用户一般传入的 消费者 包含一个处理sink 对象的逻辑 也就是调用 next 方法 将想要的数据传入 就会走 类似 sub的流程
 	 */
 	public static <T> Flux<T> create(Consumer<? super FluxSink<T>> emitter, OverflowStrategy backpressure) {
 		return onAssembly(new FluxCreate<>(emitter, backpressure, FluxCreate.CreateMode.PUSH_PULL));
@@ -733,6 +746,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param emitter Consume the {@link FluxSink} provided per-subscriber by Reactor to generate signals.
 	 * @return a {@link Flux}
 	 * @see #create(Consumer)
+	 * 适合单线程
 	 */
 	public static <T> Flux<T> push(Consumer<? super FluxSink<T>> emitter) {
 		return onAssembly(new FluxCreate<>(emitter, OverflowStrategy.BUFFER, FluxCreate.CreateMode.PUSH_ONLY));
@@ -801,6 +815,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a deferred {@link Flux}
 	 * @see #deferWithContext(Function)
+	 * 使用一个 构建 pub 的函数来进行初始化   该对象在调用 subscribe 时 会通过supplier 生成 Flux对象
 	 */
 	public static <T> Flux<T> defer(Supplier<? extends Publisher<T>> supplier) {
 		return onAssembly(new FluxDefer<>(supplier));
@@ -822,6 +837,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T>      the type of values passing through the {@link Flux}
 	 *
 	 * @return a deferred {@link Flux}
+	 * 通过 携带一个 context 的方式来创建 Flux 对象
 	 */
 	public static <T> Flux<T> deferWithContext(Function<Context, ? extends Publisher<T>> supplier) {
 		return onAssembly(new FluxDeferWithContext<>(supplier));
@@ -835,6 +851,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> the reified type of the target {@link Subscriber}
 	 *
 	 * @return an empty {@link Flux}
+	 * 返回一个空对象
 	 */
 	public static <T> Flux<T> empty() {
 		return FluxEmpty.instance();
@@ -850,6 +867,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> the reified type of the target {@link Subscriber}
 	 *
 	 * @return a new failing {@link Flux}
+	 * 返回一个 设置订阅者 触发 onError 的对象
 	 */
 	public static <T> Flux<T> error(Throwable error) {
 		return error(error, false);
@@ -866,6 +884,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> the reified type of the target {@link Subscriber}
 	 *
 	 * @return a new failing {@link Flux}
+	 * 通过 一个 supplier对象来生成异常
 	 */
 	public static <T> Flux<T> error(Supplier<? extends Throwable> errorSupplier) {
 		return onAssembly(new FluxErrorSupplied<>(errorSupplier));
@@ -883,6 +902,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <O> the reified type of the target {@link Subscriber}
 	 *
 	 * @return a new failing {@link Flux}
+	 * 当遇到异常时 throw 也会被包装成 Flux
 	 */
 	public static <O> Flux<O> error(Throwable throwable, boolean whenRequested) {
 		if (whenRequested) {
@@ -905,6 +925,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <I> The type of values in both source and output sequences
 	 *
 	 * @return a new {@link Flux} behaving like the fastest of its sources
+	 * 将一组 pub 对象包装成  flux 只有竞争成功的 pub 可以往下游发送数据 (最早的数据)
 	 */
 	@SafeVarargs
 	public static <I> Flux<I> first(Publisher<? extends I>... sources) {
@@ -923,6 +944,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <I> The type of values in both source and output sequences
 	 *
 	 * @return a new {@link Flux} behaving like the fastest of its sources
+	 * 通过迭代器来初始化
 	 */
 	public static <I> Flux<I> first(Iterable<? extends Publisher<? extends I>> sources) {
 		return onAssembly(new FluxFirstEmitting<>(sources));
@@ -937,21 +959,26 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> The type of values in both source and output sequences
 	 *
 	 * @return a new {@link Flux}
+	 * 将数据源转换成 Flux
 	 */
 	public static <T> Flux<T> from(Publisher<? extends T> source) {
+		// 如果入参是 Flux实例 转型后直接返回
 		if (source instanceof Flux) {
 			@SuppressWarnings("unchecked")
 			Flux<T> casted = (Flux<T>) source;
 			return casted;
 		}
 
+		// 如果 数据源是一个回调对象  先调用call 生成结果
 		if (source instanceof Fuseable.ScalarCallable) {
 			try {
 				@SuppressWarnings("unchecked") T t =
 						((Fuseable.ScalarCallable<T>) source).call();
 				if (t != null) {
+					// 使用just 将一般对象包装成 flux
 					return just(t);
 				}
+				// 返回内部没有任何数据源的 flux 对象
 				return empty();
 			}
 			catch (Exception e) {
@@ -970,6 +997,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> The type of values in the source array and resulting Flux
 	 *
 	 * @return a new {@link Flux}
+	 * 将一组数据转换成flux
 	 */
 	public static <T> Flux<T> fromArray(T[] array) {
 		if (array.length == 0) {
@@ -978,6 +1006,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 		if (array.length == 1) {
 			return just(array[0]);
 		}
+		// 将一组 数据包装成 flux 对象
 		return onAssembly(new FluxArray<>(array));
 	}
 
@@ -991,6 +1020,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> The type of values in the source {@link Iterable} and resulting Flux
 	 *
 	 * @return a new {@link Flux}
+	 * 通过一个迭代器作为数据源
 	 */
 	public static <T> Flux<T> fromIterable(Iterable<? extends T> it) {
 		return onAssembly(new FluxIterable<>(it));
@@ -1009,6 +1039,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> The type of values in the source {@link Stream} and resulting Flux
 	 *
 	 * @return a new {@link Flux}
+	 * 通过流对象来初始化 flux
 	 */
 	public static <T> Flux<T> fromStream(Stream<? extends T> s) {
 		Objects.requireNonNull(s, "Stream s must be provided");
@@ -1044,6 +1075,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * to generate a <strong>single</strong> signal on each pass.
 	 *
 	 * @return a {@link Flux}
+	 * 这种基于函数创建的flux 比较灵活 具体看用户怎么处理sink 对象 所以不细看  next()  error()  complete() 分别会转发到订阅者的
+	 * onNext() onError() onComplete()
 	 */
 	public static <T> Flux<T> generate(Consumer<SynchronousSink<T>> generator) {
 		Objects.requireNonNull(generator, "generator");
@@ -1105,6 +1138,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @param period the period {@link Duration} between each increment
 	 * @return a new {@link Flux} emitting increasing numbers at regular intervals
+	 * 具备定时功能的对象 会定期往下游发送数据
 	 */
 	public static Flux<Long> interval(Duration period) {
 		return interval(period, Schedulers.parallel());
@@ -1145,6 +1179,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param timer a time-capable {@link Scheduler} instance to run on
 	 *
 	 * @return a new {@link Flux} emitting increasing numbers at regular intervals
+	 * 根据指定时间间隔 和调度器对象来创建 flux
 	 */
 	public static Flux<Long> interval(Duration period, Scheduler timer) {
 		return onAssembly(new FluxInterval(period.toMillis(), period.toMillis(), TimeUnit.MILLISECONDS, timer));
@@ -1179,6 +1214,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> the emitted data type
 	 *
 	 * @return a new {@link Flux}
+	 * 尝试使用一组数据来进行初始化
 	 */
 	@SafeVarargs
 	public static <T> Flux<T> just(T... data) {
@@ -1194,8 +1230,10 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> the emitted data type
 	 *
 	 * @return a new {@link Flux}
+	 * 将某个数据对象 转换成 Flux
 	 */
 	public static <T> Flux<T> just(T data) {
+		// new FluxJust已经具备 响应式流功能的基本实现了 通过 onAssembly 进一步加工
 		return onAssembly(new FluxJust<>(data));
 	}
 
@@ -1268,6 +1306,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 */
 	public static <T> Flux<T> merge(Publisher<? extends Publisher<? extends T>> source, int concurrency, int prefetch) {
 		return onAssembly(new FluxFlatMap<>(
+				// 该 flux 对象会向下游发送 publisher
 				from(source),
 				identityFunction(),
 				false,
@@ -1294,6 +1333,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <I> The source type of the data sequence
 	 *
 	 * @return a merged {@link Flux}
+	 * 上游是一个 flux 对象 同时内部每个对象又可以看作一个 发布者 merge 就是将上游所有的发布者看作一个发布者
 	 */
 	public static <I> Flux<I> merge(Iterable<? extends Publisher<? extends I>> sources) {
 		return merge(fromIterable(sources));
@@ -1381,6 +1421,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param sources {@link Publisher} sources of {@link Comparable} to merge
 	 * @param <I> a {@link Comparable} merged type that has a {@link Comparator#naturalOrder() natural order}
 	 * @return a merged {@link Flux} that , subscribing early but keeping the original ordering
+	 * 按照特定的顺序接收上游的数据 merge() 是 谁先发数据到下游就处理谁的
 	 */
 	@SafeVarargs
 	public static <I extends Comparable<? super I>> Flux<I> mergeOrdered(Publisher<? extends I>... sources) {
@@ -1425,6 +1466,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param sources {@link Publisher} sources to merge
 	 * @param <T> the merged type
 	 * @return a merged {@link Flux} that , subscribing early but keeping the original ordering
+	 * 返回按照顺序处理上游数据的对象
 	 */
 	@SafeVarargs
 	public static <T> Flux<T> mergeOrdered(int prefetch, Comparator<? super T> comparator, Publisher<? extends T>... sources) {
@@ -1449,6 +1491,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> the merged type
 	 *
 	 * @return a merged {@link Flux}, subscribing early but keeping the original ordering
+	 * 顺序处理
 	 */
 	public static <T> Flux<T> mergeSequential(Publisher<? extends Publisher<? extends T>> sources) {
 		return mergeSequential(sources, false, Queues.SMALL_BUFFER_SIZE,
@@ -1618,6 +1661,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> the {@link Subscriber} type target
 	 *
 	 * @return a never completing {@link Flux}
+	 * 生成一个不会往下游传播任何数据的对象
 	 */
 	public static <T> Flux<T> never() {
 		return FluxNever.instance();
@@ -1634,6 +1678,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param start the first integer to be emit
 	 * @param count the total number of incrementing values to emit, including the first value
 	 * @return a ranged {@link Flux}
+	 * 将范围内的元素作为数据流传播到下游
 	 */
 	public static Flux<Integer> range(int start, int count) {
 		if (count == 1) {
@@ -1679,6 +1724,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <T> the produced type
 	 *
 	 * @return a {@link FluxProcessor} accepting publishers and producing T
+	 * 切换 ???
 	 */
 	public static <T> Flux<T> switchOnNext(Publisher<? extends Publisher<? extends T>> mergedPublishers, int prefetch) {
 		return onAssembly(new FluxSwitchMap<>(from(mergedPublishers),
@@ -1977,11 +2023,13 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <O> The produced output after transformation by the combinator
 	 *
 	 * @return a zipped {@link Flux}
+	 * 上面的先忽略 太冷门了
 	 */
     public static <T1, T2, O> Flux<O> zip(Publisher<? extends T1> source1,
 			Publisher<? extends T2> source2,
 			final BiFunction<? super T1, ? super T2, ? extends O> combinator) {
 
+    	// 将2个数据源整合成一个对象
 		return onAssembly(new FluxZip<T1, O>(source1,
 				source2,
 				combinator,
@@ -2297,6 +2345,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <O> the combined produced type
 	 *
 	 * @return a zipped {@link Flux}
+	 * 通过一个压缩函数 和一组 pub 来创建 FluxZip
 	 */
 	@SafeVarargs
 	public static <I, O> Flux<O> zip(final Function<? super Object[], ? extends O> combinator,
@@ -2374,6 +2423,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a new {@link Mono} with <code>true</code> if all values satisfies a predicate and <code>false</code>
 	 * otherwise
+	 * 判断 flux 中是否所有数据都满足 谓语条件 满足将 ture 传递到下游 否则传递 false
 	 */
 	public final Mono<Boolean> all(Predicate<? super T> predicate) {
 		return Mono.onAssembly(new MonoAll<>(this, predicate));
@@ -2393,6 +2443,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a new {@link Mono} with <code>true</code> if any value satisfies a predicate and <code>false</code>
 	 * otherwise
+	 * 跟上面类似 只要有一个 满足条件 就使用 true 触发下游 全部为 false 时 传递false到下游
 	 */
 	public final Mono<Boolean> any(Predicate<? super T> predicate) {
 		return Mono.onAssembly(new MonoAny<>(this, predicate));
@@ -2410,6 +2461,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return the {@link Flux} transformed to an instance of P
 	 * @see #compose for a bounded conversion to {@link Publisher}
+	 * 将上游对象 flux 转换成一个对象
 	 */
 	public final <P> P as(Function<? super Flux<T>, P> transformer) {
 		return transformer.apply(this);
@@ -2429,10 +2481,13 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/blockFirst.svg" alt="">
 	 *
 	 * @return the first value or null
+	 * 很多 flux 线程 pub 和 sub 在一条线程 也就没有体现出 阻塞的 概念 因为在subscribe() 中 数据已经发送到了下游
 	 */
 	@Nullable
 	public final T blockFirst() {
+		// 该对象包含一个 blockingGet 方法 会阻塞直到上游对象发送第一个数据到下游
 		BlockingFirstSubscriber<T> subscriber = new BlockingFirstSubscriber<>();
+		// 为flux(this) 设置订阅者 并阻塞当前线程 直到flux 下发第一个数据
 		subscribe((Subscriber<T>) subscriber);
 		return subscriber.blockingGet();
 	}
@@ -2452,6 +2507,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
  	 * @param timeout maximum time period to wait for before raising a {@link RuntimeException}
 	 * @return the first value or null
+	 * 阻塞指定时间并获取上游数据
 	 */
 	@Nullable
 	public final T blockFirst(Duration timeout) {
@@ -2474,6 +2530,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/blockLast.svg" alt="">
 	 *
 	 * @return the last value or null
+	 * 阻塞直到收到最后一个数据
 	 */
 	@Nullable
 	public final T blockLast() {
@@ -2516,6 +2573,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a buffered {@link Flux} of at most one {@link List}
 	 * @see #collectList() for an alternative collecting algorithm returning {@link Mono}
+	 * 将本对象内部的数据 转换成 list
 	 */
     public final Flux<List<T>> buffer() {
 	    return buffer(Integer.MAX_VALUE);
@@ -2553,6 +2611,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <C> the {@link Collection} buffer type
 	 *
 	 * @return a microbatched {@link Flux} of {@link Collection}
+	 * 将本对象内部的数据全部存放到一个 list 中
 	 */
 	public final <C extends Collection<? super T>> Flux<C> buffer(int maxSize, Supplier<C> bufferSupplier) {
 		return onAssembly(new FluxBuffer<>(this, maxSize, bufferSupplier));
@@ -3026,6 +3085,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 				bufferSupplier, Queues.unbounded(Queues.XS_BUFFER_SIZE)));
 	}
 
+	// 上面的冷门函数等用到再看 套路都是类似的
+
 	/**
 	 * Turn this {@link Flux} into a hot source and cache last emitted signals for further {@link Subscriber}. Will
 	 * retain an unbounded volume of onNext signals. Completion and Error will also be
@@ -3050,7 +3111,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/cacheWithHistoryLimitForFlux.svg" alt="">
 	 *
 	 * @param history number of elements retained in cache
-	 *
+	 *			返回的对象 会让所有订阅者共用一份数据 同时 autoConnect 代表只要设置一个订阅者就能触发数据的发送
+	 *		          history 代表会存放多少元素 也就是内部的元素不会过期
 	 * @return a replaying {@link Flux}
 	 *
 	 */
@@ -3070,6 +3132,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param ttl Time-to-live for each cached item and post termination.
 	 *
 	 * @return a replaying {@link Flux}
+	 * 代表内部元素 多久会过期
 	 */
 	public final Flux<T> cache(Duration ttl) {
 		return cache(ttl, Schedulers.parallel());
@@ -3143,6 +3206,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param clazz the target class to cast to
 	 *
 	 * @return a casted {@link Flux}
+	 * 将本对象内部的数据 转换成 class 后 传给下游
 	 */
 	public final <E> Flux<E> cast(Class<E> clazz) {
 		Objects.requireNonNull(clazz, "clazz");
@@ -3270,7 +3334,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * to accumulate an element, the container is discarded as above and the triggering element is also discarded.
 	 *
 	 * @return a {@link Mono} of the collected container on complete
-	 *
+	 * 将上游发射 的数据保存到一个 collect中
 	 */
 	public final <E> Mono<E> collect(Supplier<E> containerSupplier, BiConsumer<E, ? super T> collector) {
 		return Mono.onAssembly(new MonoCollect<>(this, containerSupplier, collector));
@@ -3345,6 +3409,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 				return list;
 			}));
 		}
+		// 将数据变成list 后传播到下游
 		return Mono.onAssembly(new MonoCollectList<>(this));
 	}
 
@@ -3552,6 +3617,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param comparator a {@link Comparator} to sort the items of this sequences
 	 *
 	 * @return a {@link Mono} of a sorted {@link List} of all values from this {@link Flux}
+	 * 这里将 flux 内多个元素 变成了一个元素 比如 list  所以 flux 也就转变成了 mono
+	 * doOnNext 会将 mono 包装成 monoPeek 对象 该对象的特性是 触发对应动作时 会先执行钩子
 	 */
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	public final Mono<List<T>> collectSortedList(@Nullable Comparator<? super T> comparator) {
@@ -3613,9 +3680,11 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <V> the produced concatenated type
 	 *
 	 * @return a concatenated {@link Flux}
+	 * 该对象的特点与 flatMap 相似 不过最上游的数据会按照顺序发到下游
 	 */
 	public final <V> Flux<V> concatMap(Function<? super T, ? extends Publisher<? extends V>>
-			mapper) {
+			mapper // 将 上游发射的单个数据转换成一个 pub
+	) {
 		return concatMap(mapper, Queues.XS_BUFFER_SIZE);
 	}
 
@@ -3650,6 +3719,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <V> the produced concatenated type
 	 *
 	 * @return a concatenated {@link Flux}
+	 * 将上层的多个 pub  按照顺序 将所有数据发送到下游
+	 * flatMap 是多个pub 内的数据不按顺序发送到下游
 	 */
 	public final <V> Flux<V> concatMap(Function<? super T, ? extends Publisher<? extends V>>
 			mapper, int prefetch) {
@@ -3796,6 +3867,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <R> the merged output sequence type
 	 *
 	 * @return a concatenation of the values from the Iterables obtained from each element in this {@link Flux}
+	 * 通过迭代器来初始化该对象
 	 */
 	public final <R> Flux<R> concatMapIterable(Function<? super T, ? extends Iterable<? extends R>> mapper) {
 		return concatMapIterable(mapper, Queues.XS_BUFFER_SIZE);
@@ -3835,6 +3907,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param other the {@link Publisher} sequence to concat after this {@link Flux}
 	 *
 	 * @return a concatenated {@link Flux}
+	 * 将该对象与 另一个 flux 结合
 	 */
 	public final Flux<T> concatWith(Publisher<? extends T> other) {
 		if (this instanceof FluxConcatArray) {
@@ -3854,6 +3927,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/count.svg" alt="">
 	 *
 	 * @return a new {@link Mono} of {@link Long} count
+	 * 该对象会 拦截 onNext 并增加计数 直到onComplete 时 直接将结果下发到下游
 	 */
 	public final Mono<Long> count() {
 		return Mono.onAssembly(new MonoCount<>(this));
@@ -4258,6 +4332,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param onCancel the callback to call on {@link Subscription#cancel}
 	 *
 	 * @return an observed  {@link Flux}
+	 * 在对应的时机增加对应的 钩子
 	 */
 	public final Flux<T> doOnCancel(Runnable onCancel) {
 		Objects.requireNonNull(onCancel, "onCancel");
@@ -4499,6 +4574,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @param onFirst the callback to execute before the {@link Flux} is subscribed to
 	 * @return an observed {@link Flux}
+	 * 当执行 subscribe() 前 触发钩子
 	 */
 	public final Flux<T> doFirst(Runnable onFirst) {
 		Objects.requireNonNull(onFirst, "onFirst");
@@ -4560,6 +4636,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param scheduler a {@link Scheduler} instance to {@link Scheduler#now(TimeUnit) read time from}
 	 *
 	 * @return a new {@link Flux} that emits tuples of time elapsed in milliseconds and matching data
+	 * 该对象会加工下发的数据  额外携带一个 距离上次onNext 的触发时间
 	 */
 	public final Flux<Tuple2<Long, T>> elapsed(Scheduler scheduler) {
 		Objects.requireNonNull(scheduler, "scheduler");
@@ -4578,6 +4655,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param index zero-based index of the only item to emit
 	 *
 	 * @return a {@link Mono} of the item at the specified zero-based index
+	 * 只会将 flux 中对应 index 的元素下发  所以转换成了一个mono
 	 */
 	public final Mono<T> elementAt(int index) {
 		return Mono.onAssembly(new MonoElementAt<>(this, index));
@@ -4712,6 +4790,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * elements per level of recursion.
 	 *
 	 * @return an breadth-first expanded {@link Flux}
+	 * 将pub 下发的数据 转换成 pub 后继续下发
 	 */
 	public final Flux<T> expand(Function<? super T, ? extends Publisher<? extends T>> expander,
 			int capacityHint) {
@@ -4773,6 +4852,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * also discards elements internally queued for backpressure upon cancellation or error triggered by a data signal.
 	 *
 	 * @return a new {@link Flux} containing only values that pass the predicate test
+	 * onNext 的数据必须要通过谓语才能下发
 	 */
 	public final Flux<T> filter(Predicate<? super T> p) {
 		if (this instanceof Fuseable) {
@@ -5356,7 +5436,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <V> the value type extracted from each value of this sequence
 	 *
 	 * @return a {@link Flux} of {@link GroupedFlux} grouped sequences
-	 *
+	 * 将上游数据 按照 keyMapper 和 valueMapper 来生成对应的值
 	 */
 	public final <K, V> Flux<GroupedFlux<K, V>> groupBy(Function<? super T, ? extends K> keyMapper,
 			Function<? super T, ? extends V> valueMapper) {
@@ -5387,7 +5467,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <V> the value type extracted from each value of this sequence
 	 *
 	 * @return a {@link Flux} of {@link GroupedFlux} grouped sequences
-	 *
+	 * 将上游数据 按照 kepMapper分组 之后将group 对象传播到下游
 	 */
 	public final <K, V> Flux<GroupedFlux<K, V>> groupBy(Function<? super T, ? extends K> keyMapper,
 			Function<? super T, ? extends V> valueMapper, int prefetch) {
@@ -5453,6 +5533,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * {@link SynchronousSink#error(Throwable)}.
 	 *
 	 * @return a transformed {@link Flux}
+	 * 用户自行定义数据的下发
 	 */
 	public final <R> Flux<R> handle(BiConsumer<? super T, SynchronousSink<R>> handler) {
 		if (this instanceof Fuseable) {
@@ -5492,6 +5573,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a new {@link Mono} with <code>true</code> if any value is emitted and <code>false</code>
 	 * otherwise
+     * 一旦有元素 将 true 发送到下游 否则发送false
 	 */
 	public final Mono<Boolean> hasElements() {
 		return Mono.onAssembly(new MonoHasElements<>(this));
@@ -5503,6 +5585,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * optimizations from happening, mostly for diagnostic purposes.
 	 *
 	 * @return a new {@link Flux} preventing {@link Publisher} / {@link Subscription} based Reactor optimizations
+     * 生成一个包装对象
 	 */
 	public Flux<T> hide() {
 		return new FluxHide<>(this);
@@ -5554,6 +5637,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @reactor.discard This operator discards the upstream's elements.
 	 *
 	 * @return a new empty {@link Mono} representing the completion of this {@link Flux}.
+     * 忽略 onNext  只注意 onComplete
 	 */
 	public final Mono<T> ignoreElements() {
 		return Mono.onAssembly(new MonoIgnoreElements<>(this));
@@ -5587,6 +5671,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a joining {@link Flux}
 	 * @see #groupJoin(Publisher, Function, Function, BiFunction)
+     * 左右每个下发的数据都会变成 pub 之后再整合起来
+     * 该方法是模仿forkJoin的 然而要使用的话 本身的参数(函数) 设置就会比较复杂 应该比较少用 先忽略
 	 */
 	public final <TRight, TLeftEnd, TRightEnd, R> Flux<R> join(
 			Publisher<? extends TRight> other,
@@ -5687,6 +5773,11 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @return a {@link Flux} limiting downstream's backpressure
 	 * @see #publishOn(Scheduler, int)
 	 * @see #limitRequest(long)
+     * Schedulers.immediate() 会返回一个模拟执行器 内部没有使用额外的线程执行任务
+     * 按照一定的比率来拉取数据  很多flux 在接收到订阅者时 都是 request(Integer.Max_Value)  同时 如果下游有背压队列 就很容易触发背压异常
+     * 这里强制指定下发数据的速度
+     *
+     * 这个方法应该是不能单独使用的  如果使用的是immediate 那么线程会堵住 直接触发下游的 onComplete
 	 */
 	public final Flux<T> limitRate(int prefetchRate) {
 		return onAssembly(this.publishOn(Schedulers.immediate(), prefetchRate));
@@ -5917,6 +6008,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * from upstream.
 	 *
 	 * @return a transformed {@link Flux}
+     * 数据T 会通过mapper 转换成 V 后发送到下游
 	 */
 	public final <V> Flux<V> map(Function<? super T, ? extends V> mapper) {
 		if (this instanceof Fuseable) {
@@ -6024,6 +6116,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @param name a name for the sequence
 	 * @return the same sequence, but bearing a name
+     * 为当前flux 对象追加 名字
 	 */
 	public final Flux<T> name(String name) {
 		return FluxName.createOrAppend(this, name);
@@ -6035,6 +6128,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/next.svg" alt="">
 	 *
 	 * @return a new {@link Mono} emitting the first value in this {@link Flux}
+     * 将发射的第一个数据 发射到下游 那不就跟 first一样吗???
 	 */
 	public final Mono<T> next() {
 		if(this instanceof Callable){
@@ -6073,7 +6167,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @reactor.discard This operator discards the buffered overflow elements upon cancellation or error triggered by a data signal.
 	 *
 	 * @return a backpressured {@link Flux} that buffers with unbounded capacity
-	 *
+	 * 将数据存放到背压容器中
+     * 默认情况下 没有设置 超负荷时的 consumer
 	 */
 	public final Flux<T> onBackpressureBuffer() {
 		return onAssembly(new FluxOnBackpressureBuffer<>(this, Queues
@@ -6153,6 +6248,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a backpressured {@link Flux} that buffers up to a capacity then applies an
 	 * overflow strategy
+     * 通过指定的背压策略来进一步处理数据  也就是可以为该对象 与下游的对象设置一样的 prefetch 这样下层的背压会被该对象拦截
+     * 能这样做吗???
 	 */
 	public final Flux<T> onBackpressureBuffer(int maxSize, BufferOverflowStrategy bufferOverflowStrategy) {
 		Objects.requireNonNull(bufferOverflowStrategy, "bufferOverflowStrategy");
@@ -6246,6 +6343,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a backpressured {@link Flux} that buffers with a TTL and up to a capacity then applies an
 	 * overflow strategy
+     * 下发数据的同时 创建一个定时任务 如果 onNext 没有在指定时间触发 定时任务会把过期的数据丢弃
 	 */
 	public final Flux<T> onBackpressureBuffer(Duration ttl, int maxSize, Consumer<? super T> onBufferEviction, Scheduler scheduler) {
 		Objects.requireNonNull(ttl, "ttl");
@@ -6335,6 +6433,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param errorConsumer a {@link BiConsumer} fed with errors matching the predicate and the value
 	 * that triggered the error.
 	 * @return a {@link Flux} that attempts to continue processing on errors.
+	 * 为当前上下文对象填充钩子 这样在遇到一些对应的异常情况时 会使用钩子处理
+	 * 这里设置 在onNext 发送异常时 执行的钩子
 	 */
 	public final Flux<T> onErrorContinue(BiConsumer<Throwable, Object> errorConsumer) {
 		BiConsumer<Throwable, Object> genericConsumer = errorConsumer;
@@ -6362,6 +6462,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param errorConsumer a {@link BiConsumer} fed with errors matching the {@link Class}
 	 * and the value that triggered the error.
 	 * @return a {@link Flux} that attempts to continue processing on some errors.
+	 * 如果抛出的异常是 指定class的对象 则允许使用 consumer 去消化异常
 	 */
 	public final <E extends Throwable> Flux<T> onErrorContinue(Class<E> type, BiConsumer<Throwable, Object> errorConsumer) {
 		return onErrorContinue(type::isInstance, errorConsumer);
@@ -6409,6 +6510,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a {@link Flux} that terminates on errors, even if {@link #onErrorContinue(BiConsumer)}
 	 * was used downstream
+	 * stop 代表 不会使用自定义 consumer去消化异常
 	 */
 	public final Flux<T> onErrorStop() {
 		return subscriberContext(Context.of(
@@ -6588,6 +6690,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return the fastest sequence
 	 * @see #first
+	 * 只会使用竞争成功的 pub  (谁先触发onNext 就保留谁)
 	 */
 	public final Flux<T> or(Publisher<? extends T> other) {
 		if (this instanceof FluxFirstEmitting) {
@@ -6610,6 +6713,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/parallel.svg" alt="">
 	 *
 	 * @return a new {@link ParallelFlux} instance
+	 * 将本对象变成一个 并行的 pub 这样发射数据 都是并行的了 下游的 onNext 可能会被并发访问
 	 */
 	public final ParallelFlux<T> parallel() {
 		return parallel(Schedulers.DEFAULT_POOL_SIZE);
@@ -6646,6 +6750,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param prefetch the number of values to prefetch from the source
 	 *
 	 * @return a new {@link ParallelFlux} instance
+	 * 根据并行度将本对象拆分  这样就可以通过多个订阅者来订阅数据   每个子订阅者会分流上游的数据
 	 */
 	public final ParallelFlux<T> parallel(int parallelism, int prefetch) {
 		return ParallelFlux.from(this,
@@ -6686,6 +6791,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param prefetch bounded requested demand
 	 *
 	 * @return a new {@link ConnectableFlux}
+	 * connectableFlux 的特点是只有满足一定量的订阅者才会触发 拉取上游数据的动作
 	 */
 	public final ConnectableFlux<T> publish(int prefetch) {
 		return onAssembly(new FluxPublish<>(this, prefetch, Queues
@@ -6733,6 +6839,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/publishNext.svg" alt="">
 	 *
 	 * @return a new {@link Mono}
+	 * 返回的mono对象 必须调用 block() 才能触发拉取上游数据
 	 */
 	public final Mono<T> publishNext() {
 		return Mono.onAssembly(new MonoProcessor<>(this));
@@ -6757,6 +6864,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param scheduler a {@link Scheduler} providing the {@link Worker} where to publish
 	 *
 	 * @return a {@link Flux} producing asynchronously on a given {@link Scheduler}
+	 * 将上游数据发送到转发对象  和  转发对象下发数据 通过不同线程来解耦
 	 */
 	public final Flux<T> publishOn(Scheduler scheduler) {
 		return publishOn(scheduler, Queues.SMALL_BUFFER_SIZE);
@@ -6813,6 +6921,14 @@ public abstract class Flux<T> implements CorePublisher<T> {
 		return publishOn(scheduler, delayError, prefetch, prefetch);
 	}
 
+    /**
+     * 代表 在另一个线程执行数据的发布动作
+     * @param scheduler
+     * @param delayError
+     * @param prefetch   highTide  决定数据下发速度的上限 一旦最上游的数据下发过快 就会触发背压异常
+     * @param lowTide   lowTide   代表下游 request 的速度 如果过快 而上游没有及时生成数据 就会提前触发 onComplete
+     * @return
+     */
 	final Flux<T> publishOn(Scheduler scheduler, boolean delayError, int prefetch, int lowTide) {
 		if (this instanceof Callable) {
 			if (this instanceof Fuseable.ScalarCallable) {
@@ -6849,6 +6965,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param aggregator the reducing {@link BiFunction}
 	 *
 	 * @return a reduced {@link Flux}
+	 * 将 flux 的数据 通过聚合器不断累加后 将结果传播到下游
 	 */
 	public final Mono<T> reduce(BiFunction<T, T, T> aggregator) {
 		if (this instanceof Callable){
@@ -6899,6 +7016,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param <A> the type of the seed and the reduced object
 	 *
 	 * @return a reduced {@link Flux}
+	 * 同时分配初始值 和 累加函数  这里的reduce 应该是归纳的意思
 	 *
 	 */
 	public final <A> Mono<A> reduceWith(Supplier<A> initial, BiFunction<A, ? super T, A> accumulator) {
@@ -6927,6 +7045,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param predicate the boolean to evaluate on onComplete.
 	 *
 	 * @return a {@link Flux} that repeats on onComplete while the predicate matches
+	 * 当整个数据流处理完后 根据谓语条件判断是否要重新订阅source
 	 */
 	public final Flux<T> repeat(BooleanSupplier predicate) {
 		return onAssembly(new FluxRepeatPredicate<>(this, predicate));
@@ -6943,6 +7062,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param numRepeat the number of times to re-subscribe on onComplete (positive, or 0 for original sequence only)
 	 *
 	 * @return a {@link Flux} that repeats on onComplete, up to the specified number of repetitions
+	 * 重复订阅 source
 	 */
 	public final Flux<T> repeat(long numRepeat) {
 		if(numRepeat == 0L){
@@ -6971,6 +7091,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 		if (numRepeat == 0) {
 			return this;
 		}
+		// defer 代表通过一个 supplier来生成 pub
 		return defer( () -> repeat(countingBooleanSupplier(predicate, numRepeat)));
 	}
 
@@ -7049,7 +7170,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * error
 	 *
 	 * @return a replaying {@link ConnectableFlux}
-	 *
+	 * 代表下游数据 共同从中转站消费数据 同时 中转站保留的数据量为 history
 	 */
 	public final ConnectableFlux<T> replay(int history) {
 		return onAssembly(new FluxReplay<>(this, history, 0L, null));
@@ -7156,7 +7277,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param numRetries the number of times to tolerate an error
 	 *
 	 * @return a {@link Flux} that retries on onError up to the specified number of retry attempts.
-	 *
+	 * 该对象是当出现 onError时 进行重试的次数
 	 */
 	public final Flux<T> retry(long numRetries) {
 		return onAssembly(new FluxRetry<>(this, numRetries));
@@ -7659,6 +7780,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a {@link Flux} that upon first subscribe causes the source {@link Flux}
 	 * to subscribe once, late subscribers might therefore miss items.
+	 * publish 的 特性是必须触发 connect 才会向上游拉取数据
+	 * 1 代表只要满足至少一个订阅者就会触发 connect
 	 */
 	public final Flux<T> share() {
 		return onAssembly(new FluxRefCount<>(
@@ -7675,6 +7798,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/singleForFlux.svg" alt="">
 	 *
 	 * @return a {@link Mono} with the single item or an error signal
+	 * 代表只发射一个元素的mono
 	 */
     public final Mono<T> single() {
 	    if (this instanceof Callable) {
@@ -7770,6 +7894,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a dropping {@link Flux} with the specified number of elements skipped at
 	 * the beginning
+	 * 代表会跳过第几个元素
 	 */
 	public final Flux<T> skip(long skipped) {
 		if (skipped == 0L) {
@@ -7809,9 +7934,11 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param timer a time-capable {@link Scheduler} instance to measure the time window on
 	 *
 	 * @return a {@link Flux} dropping at the beginning for the given duration
+	 * 跳过timespan 间收到的数据
 	 */
 	public final Flux<T> skip(Duration timespan, Scheduler timer) {
 		if(!timespan.isZero()) {
+			// Mono.delay 会生成一个 在一定延时后发射一个元素到下游的mono对象
 			return skipUntilOther(Mono.delay(timespan, timer));
 		}
 		else{
@@ -7937,6 +8064,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param iterable the sequence of values to start the resulting {@link Flux} with
 	 *
 	 * @return a new {@link Flux} prefixed with elements from an {@link Iterable}
+	 * 将 迭代器的元素 追加到flux 之前
 	 */
 	public final Flux<T> startWith(Iterable<? extends T> iterable) {
 		return startWith(fromIterable(iterable));
@@ -8148,12 +8276,19 @@ public abstract class Flux<T> implements CorePublisher<T> {
 				initialContext));
 	}
 
+	/**
+	 * 为该对象设置的订阅者
+	 * @param actual
+	 */
 	@Override
 	@SuppressWarnings("unchecked")
 	public final void subscribe(Subscriber<? super T> actual) {
+		// 使用钩子加工本对象
 		CorePublisher publisher = Operators.onLastAssembly(this);
+		// 将 subscriber 适配成 CoreSubscriber
 		CoreSubscriber subscriber = Operators.toCoreSubscriber(actual);
 
+		// 下面的模板 便于子类去拓展
 		if (publisher instanceof OptimizableOperator) {
 			OptimizableOperator operator = (OptimizableOperator) publisher;
 			while (true) {
@@ -8204,6 +8339,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a contextualized {@link Flux}
 	 * @see Context
+	 * 设置本次处理时的context 对象    该对象内部主要是存放各个时机对应的函数 比如 doOnNext doOnError
 	 */
 	public final Flux<T> subscriberContext(Context mergeContext) {
 		return subscriberContext(c -> c.putAll(mergeContext));
@@ -8226,6 +8362,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a contextualized {@link Flux}
 	 * @see Context
+	 * 在被订阅前会加工context
 	 */
 	public final Flux<T> subscriberContext(Function<Context, Context> doOnContext) {
 		return new FluxContextStart<>(this, doOnContext);
@@ -8261,6 +8398,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @return a {@link Flux} requesting asynchronously
 	 * @see #publishOn(Scheduler)
 	 * @see #subscribeOn(Scheduler, boolean)
+	 * publishOn 是 上游将数据发射到中转站后 就继续发射下一个元素了 同时使用另一个线程负责从中转站将数据发射到下游
 	 */
 	public final Flux<T> subscribeOn(Scheduler scheduler) {
 		return subscribeOn(scheduler, true);
@@ -8300,6 +8438,8 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @return a {@link Flux} requesting asynchronously
 	 * @see #publishOn(Scheduler)
 	 * @see #subscribeOn(Scheduler)
+	 * 该对象与 publishOn 的 线程切换时机不同  publishOn 会在调用subscibe() 的线程完成 上游数据到中转站数据的发射
+	 * 而 subscribeOn 则是从调用subscribe() 开始 就变成异步模式了
 	 */
 	public final Flux<T> subscribeOn(Scheduler scheduler, boolean requestOnSeparateThread) {
 		if (this instanceof Callable) {
@@ -8472,6 +8612,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 *
 	 * @return a {@link Flux} limited to size N
 	 * @see #limitRequest(long)
+	 * 只拉取前面几个元素
 	 */
 	public final Flux<T> take(long n) {
 		if (this instanceof Fuseable) {
@@ -8513,6 +8654,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param timer a time-capable {@link Scheduler} instance to run on
 	 *
 	 * @return a {@link Flux} limited to elements emitted within a specific duration
+	 * 推测跟skip 相反 之获取第二个 pub下发元素前的 元素
 	 */
 	public final Flux<T> take(Duration timespan, Scheduler timer) {
 		if (!timespan.isZero()) {
@@ -8600,6 +8742,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @reactor.discard This operator discards elements from the source.
 	 *
 	 * @return a new {@link Mono} representing the termination of this {@link Flux}
+	 * 忽略下发的数据 只关注 onComplete
 	 */
 	public final Mono<Void> then() {
 		@SuppressWarnings("unchecked")
@@ -8640,6 +8783,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param other a {@link Publisher} to wait for after this Flux's termination
 	 * @return a new {@link Mono} completing when both publishers have completed in
 	 * sequence
+	 * 相当于适配了上面的方法 多了一步 pub->mono  的转换
 	 */
 	public final Mono<Void> thenEmpty(Publisher<Void> other) {
 		return then(Mono.fromDirect(other));
@@ -8794,6 +8938,16 @@ public abstract class Flux<T> implements CorePublisher<T> {
 		return timeout(firstTimeout, nextTimeoutFactory, "first signal from a Publisher");
 	}
 
+	/**
+	 * source 发送的每个数据通过 nextTimeoutFactory 转换成pub 并且 当接收到该pub的数据时 就会检测  source是否发送了新的数据 没有的话
+	 * 则是出现超时异常
+	 * @param firstTimeout
+	 * @param nextTimeoutFactory
+	 * @param timeoutDescription
+	 * @param <U>
+	 * @param <V>
+	 * @return
+	 */
 	private final <U, V> Flux<T> timeout(Publisher<U> firstTimeout,
 			Function<? super T, ? extends Publisher<V>> nextTimeoutFactory,
 			String timeoutDescription) {
@@ -8908,6 +9062,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * elements emitted faster than the iteration
 	 *
 	 * @return a blocking {@link Iterable}
+	 * 将 flux 模拟成一个迭代器  当调用 hasNext() 时 会阻塞当前线程直到接收到新数据
 	 */
 	public final Iterable<T> toIterable(int batchSize, @Nullable Supplier<Queue<T>>
 			queueProvider) {
@@ -9027,6 +9182,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param maxSize the maximum number of items to emit in the window before closing it
 	 *
 	 * @return a {@link Flux} of {@link Flux} windows based on element count
+	 * 每次下发的是一个 包含maxSize元素的 新flux
 	 */
 	public final Flux<Flux<T>> window(int maxSize) {
 		return onAssembly(new FluxWindow<>(this, maxSize, Queues.get(maxSize)));
@@ -9653,13 +9809,17 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param source the source to apply assembly hooks onto
 	 *
 	 * @return the source, potentially wrapped with assembly time cross-cutting behavior
+	 * 加工数据源
 	 */
 	@SuppressWarnings("unchecked")
 	protected static <T> Flux<T> onAssembly(Flux<T> source) {
+		// TODO 从全局范围内获取一个钩子对象
 		Function<Publisher, Publisher> hook = Hooks.onEachOperatorHook;
 		if(hook != null) {
+			// 存在钩子的情况 加工flux
 			source = (Flux<T>) hook.apply(source);
 		}
+		// TODO 是否开启链路追踪  这里先忽略
 		if (Hooks.GLOBAL_TRACE) {
 			AssemblySnapshot stacktrace = new AssemblySnapshot(null, Traces.callSiteSupplierFactory.get());
 			source = (Flux<T>) Hooks.addAssemblyInfo(source, stacktrace);
@@ -9795,6 +9955,14 @@ public abstract class Flux<T> implements CorePublisher<T> {
 		return Mono.onAssembly(new MonoCallable<>(supplier));
 	}
 
+	/**
+	 * 将一组 pub 看作一个 pub
+	 * @param prefetch
+	 * @param delayError
+	 * @param sources
+	 * @param <I>
+	 * @return
+	 */
 	@SafeVarargs
 	static <I> Flux<I> merge(int prefetch, boolean delayError, Publisher<? extends I>... sources) {
 		if (sources.length == 0) {
@@ -9833,6 +10001,15 @@ public abstract class Flux<T> implements CorePublisher<T> {
 				FluxConcatMap.ErrorMode.IMMEDIATE));
 	}
 
+	/**
+	 * 整合上游数据 同时按顺序传播到下游
+	 * @param sources
+	 * @param delayError
+	 * @param maxConcurrency
+	 * @param prefetch
+	 * @param <I>
+	 * @return
+	 */
 	static <I> Flux<I> mergeSequential(Iterable<? extends Publisher<? extends I>> sources,
 			boolean delayError, int maxConcurrency, int prefetch) {
 		return onAssembly(new FluxMergeSequential<>(new FluxIterable<>(sources),
@@ -9900,6 +10077,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * @param source the {@link Publisher} to wrap
 	 * @param <I> input upstream type
 	 * @return a wrapped {@link Flux}
+	 * 类似于适配模式 传入的参数 不是 Flux 的实例对象
 	 */
 	@SuppressWarnings("unchecked")
 	static <I> Flux<I> wrap(Publisher<? extends I> source){
@@ -9907,8 +10085,10 @@ public abstract class Flux<T> implements CorePublisher<T> {
 			if(source instanceof Fuseable){
 				return new FluxSourceMonoFuseable<>((Mono<I>)source);
 			}
+			// 将一个 Mono 对象 适配成 Flux
 			return new FluxSourceMono<>((Mono<I>)source);
 		}
+		// Pub 既不是 Flux 的实例 也不是 Mono 的实例
 		if(source instanceof Fuseable){
 			return new FluxSourceFuseable<>(source);
 		}

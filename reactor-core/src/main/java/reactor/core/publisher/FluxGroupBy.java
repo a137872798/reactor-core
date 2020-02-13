@@ -44,6 +44,7 @@ import reactor.util.context.Context;
  * @param <V> the group item value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ *
  */
 final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, V>>
 		implements Fuseable {
@@ -59,8 +60,8 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 	final int prefetch;
 
 	FluxGroupBy(Flux<? extends T> source,
-			Function<? super T, ? extends K> keySelector,
-			Function<? super T, ? extends V> valueSelector,
+			Function<? super T, ? extends K> keySelector,   // 用于将数据转换成 key
+			Function<? super T, ? extends V> valueSelector,  // 用于将数据转换成 value
 			Supplier<? extends Queue<GroupedFlux<K, V>>> mainQueueSupplier,
 			Supplier<? extends Queue<V>> groupQueueSupplier,
 			int prefetch) {
@@ -91,15 +92,23 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 		return prefetch;
 	}
 
+	/**
+	 * 包装订阅者
+	 * @param <T>
+	 * @param <K>
+	 * @param <V>
+	 */
 	static final class GroupByMain<T, K, V>
 			implements QueueSubscription<GroupedFlux<K, V>>,
 			           InnerOperator<T, GroupedFlux<K, V>> {
 
 		final Function<? super T, ? extends K>          keySelector;
 		final Function<? super T, ? extends V>          valueSelector;
+		// GroupedFlux 是数据源  按顺序存放 上游生成的 groupedFlux 就跟linkedHashMap 一致
 		final Queue<GroupedFlux<K, V>>                  queue;
 		final Supplier<? extends Queue<V>>              groupQueueSupplier;
 		final int                                       prefetch;
+		// UnicastGroupedFlux 按照key 来划分
 		final Map<K, UnicastGroupedFlux<K, V>>          groupMap;
 		final CoreSubscriber<? super GroupedFlux<K, V>> actual;
 
@@ -127,6 +136,9 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 		static final AtomicIntegerFieldUpdater<GroupByMain> CANCELLED =
 				AtomicIntegerFieldUpdater.newUpdater(GroupByMain.class, "cancelled");
 
+		/**
+		 * 初始状态 只有1组
+		 */
 		volatile int groupCount;
 		@SuppressWarnings("rawtypes")
 		static final AtomicIntegerFieldUpdater<GroupByMain> GROUP_COUNT =
@@ -157,15 +169,24 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			return actual;
 		}
 
+		/**
+		 * 为该对象设置订阅者
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
+				// 触发本对象的 request  核心就是增加 requested
 				actual.onSubscribe(this);
 				s.request(Operators.unboundedOrPrefetch(prefetch));
 			}
 		}
 
+		/**
+		 * 当上游发射数据时
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if(done){
@@ -176,6 +197,7 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			K key;
 			V value;
 
+			// 将上游数据转换成 key 和 value
 			try {
 				key = Objects.requireNonNull(keySelector.apply(t), "The keySelector returned a null value");
 				value = Objects.requireNonNull(valueSelector.apply(t), "The valueSelector returned a null value");
@@ -185,19 +207,24 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 				return;
 			}
 
+			// 按照key 分组生成 flux对象
 			UnicastGroupedFlux<K, V> g = groupMap.get(key);
 
+			// 代表该key 还没有对应的flux 对象那么就要增加新的组
 			if (g == null) {
 				// if the main is cancelled, don't create new groups
 				if (cancelled == 0) {
 					Queue<V> q = groupQueueSupplier.get();
 
 					GROUP_COUNT.getAndIncrement(this);
+					// 该 flux 对象内部使用一个 queue 来存储数据
 					g = new UnicastGroupedFlux<>(key, q, this, prefetch);
+					// 将上游发来的数据 转发到 flux 中
 					g.onNext(value);
 					groupMap.put(key, g);
 
 					queue.offer(g);
+					// 这里会将 UnicastGroupedFlux 对象传到下游 由用户自己决定怎么处理  应该是配合 flatMap concatMap 等函数使用
 					drain();
 				}
 			}
@@ -217,12 +244,16 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			}
 		}
 
+		/**
+		 * 当上游的所有数据都发送到下游了 也就是分组 完毕 开始真正拉取数据了
+		 */
 		@Override
 		public void onComplete() {
 			if(done){
 				return;
 			}
 			for (UnicastGroupedFlux<K, V> g : groupMap.values()) {
+				// 挨个触发每个子对象的 发射动作
 				g.onComplete();
 			}
 			groupMap.clear();
@@ -294,16 +325,24 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			}
 		}
 
+		/**
+		 * 代表某个key 对应的子对象接收完数据
+		 * @param key
+		 */
 		void groupTerminated(K key) {
 			if (groupCount == 0) {
 				return;
 			}
 			groupMap.remove(key);
 			if (GROUP_COUNT.decrementAndGet(this) == 0) {
+				// 关闭最上游数据
 				s.cancel();
 			}
 		}
 
+		/**
+		 * 开始拉取数据
+		 */
 		void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
 				return;
@@ -352,6 +391,9 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			}
 		}
 
+		/**
+		 * 开始拉取数据
+		 */
 		void drainLoop() {
 
 			int missed = 1;
@@ -366,6 +408,7 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 
 				while (e != r) {
 					boolean d = done;
+					// 从队列中取出 flux 对象
 					GroupedFlux<K, V> v = q.poll();
 					boolean empty = v == null;
 
@@ -377,6 +420,7 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 						break;
 					}
 
+					// 这里已经指定了 订阅者会订阅的数据类型了
 					a.onNext(v);
 
 					e++;
@@ -390,6 +434,7 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 
 				if (e != 0L) {
 
+					// 继续向上请求数据
 					s.request(e);
 
 					if (r != Long.MAX_VALUE) {
@@ -416,6 +461,7 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 					return true;
 				}
 				else if (empty) {
+					// 触发下游接收 group 对象的订阅者的 onComplete 方法
 					a.onComplete();
 					return true;
 				}
@@ -455,9 +501,18 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 		}
 	}
 
+	/**
+	 * 该对象属于 flux (pub) 具备往下游发射数据的能力
+	 * 用户需要自行订阅该对象
+	 * @param <K>
+	 * @param <V>
+	 */
 	static final class UnicastGroupedFlux<K, V> extends GroupedFlux<K, V>
 			implements Fuseable, QueueSubscription<V>, InnerProducer<V> {
 
+		/**
+		 * 该对象绑定的key
+		 */
 		final K key;
 
 		final int limit;
@@ -469,8 +524,14 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			return key;
 		}
 
+		/**
+		 * 该 flux 内存放的数据
+		 */
 		final Queue<V> queue;
 
+		/**
+		 * 该对象是通过哪个父对象进行划分的
+		 */
 		volatile GroupByMain<?, K, V> parent;
 		@SuppressWarnings("rawtypes")
 		static final AtomicReferenceFieldUpdater<UnicastGroupedFlux, GroupByMain> PARENT =
@@ -520,13 +581,21 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			this.limit = Operators.unboundedOrLimit(prefetch);
 		}
 
+		/**
+		 * 代表 本对象已经不会接收到新的数据了
+		 */
 		void doTerminate() {
 			GroupByMain<?, K, V> r = parent;
 			if (r != null && PARENT.compareAndSet(this, r, null)) {
+				// 通知父对象 本对象接收完毕
 				r.groupTerminated(key);
 			}
 		}
 
+		/**
+		 * 按照 queue 内元素的顺序 下发到订阅者
+		 * @param a
+		 */
 		void drainRegular(Subscriber<? super V> a) {
 			int missed = 1;
 
@@ -616,8 +685,12 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			}
 		}
 
+		/**
+		 * 将 group 中的数据发送到下游
+		 */
 		void drain() {
 			Subscriber<? super V> a = actual;
+			// 确保已经设置了订阅者
 			if (a != null) {
 				if (WIP.getAndIncrement(this) != 0) {
 					return;
@@ -653,9 +726,14 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			return false;
 		}
 
+		/**
+		 * 代表上游的数据 通过keyMapper 定位到一个 group 对象后 发射到 group中
+		 * @param t
+		 */
 		public void onNext(V t) {
 			Subscriber<? super V> a = actual;
 
+			// 将数据存储到 queue 中
 			if (!queue.offer(t)) {
 				onError(Operators.onOperatorError(this, Exceptions.failWithOverflow(Exceptions.BACKPRESSURE_ERROR_QUEUE_FULL), t,
 						actual.currentContext()));
@@ -680,6 +758,9 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			drain();
 		}
 
+		/**
+		 * 当上游发射完数据时 触发该方法
+		 */
 		public void onComplete() {
 			done = true;
 
@@ -688,6 +769,10 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			drain();
 		}
 
+		/**
+		 * 用户订阅分组后的对象
+		 * @param actual the {@link Subscriber} interested into the published sequence
+		 */
 		@Override
 		public void subscribe(CoreSubscriber<? super V> actual) {
 			if (once == 0 && ONCE.compareAndSet(this, 0, 1)) {
@@ -701,10 +786,15 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			}
 		}
 
+		/**
+		 * 用户对象会触发该方法
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
 				Operators.addCap(REQUESTED, this, n);
+				// 尝试从本对象中拉取数据并发送到下游
 				drain();
 			}
 		}

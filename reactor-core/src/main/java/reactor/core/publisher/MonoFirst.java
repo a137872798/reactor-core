@@ -33,6 +33,9 @@ import reactor.util.annotation.Nullable;
  */
 final class MonoFirst<T> extends Mono<T> implements SourceProducer<T>  {
 
+	/**
+	 * 内部包含一组数据
+	 */
 	final Mono<? extends T>[] array;
 
 	final Iterable<? extends Mono<? extends T>> iterable;

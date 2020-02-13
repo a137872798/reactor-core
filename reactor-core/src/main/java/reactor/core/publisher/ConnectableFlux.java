@@ -30,6 +30,7 @@ import reactor.core.scheduler.Schedulers;
  * @see #publish
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
  * @param <T> the input and output value type
+ *           FluxReplay 对象是该对象的子类
  */
 public abstract class ConnectableFlux<T> extends Flux<T> {
 
@@ -41,6 +42,7 @@ public abstract class ConnectableFlux<T> extends Flux<T> {
 	 * <img class="marble" src="doc-files/marbles/autoConnect.svg" alt="">
 	 *
 	 * @return a {@link Flux} that connects to the upstream source when the first {@link org.reactivestreams.Subscriber} subscribes
+	 * 返回一个 flux 对象 会连接到本对象
 	 */
 	public final Flux<T> autoConnect() {
 		return autoConnect(1);
@@ -59,6 +61,7 @@ public abstract class ConnectableFlux<T> extends Flux<T> {
 	 * @param minSubscribers the minimum number of subscribers
 	 *
 	 * @return a {@link Flux} that connects to the upstream source when the given amount of Subscribers subscribed
+	 * 代表为该对象创建一个连接对象  至少满足多少订阅者时才会起作用
 	 */
 	public final Flux<T> autoConnect(int minSubscribers) {
 		return autoConnect(minSubscribers, NOOP_DISCONNECT);
@@ -74,8 +77,10 @@ public abstract class ConnectableFlux<T> extends Flux<T> {
 	 * @param minSubscribers the minimum number of subscribers
 	 * @param cancelSupport the consumer that will receive the {@link Disposable} that allows disconnecting
 	 * @return a {@link Flux} that connects to the upstream source when the given amount of subscribers subscribed
+	 * 为该对象绑定一个 连接对象  至少会再多少订阅者时起作用
 	 */
 	public final Flux<T> autoConnect(int minSubscribers, Consumer<? super Disposable> cancelSupport) {
+	    // 当中最小订阅者为 0 时 直接触发 connect
 		if (minSubscribers == 0) {
 			connect(cancelSupport);
 			return this;
@@ -85,6 +90,7 @@ public abstract class ConnectableFlux<T> extends Flux<T> {
 					minSubscribers,
 					cancelSupport));
 		}
+		// 将该对象包装成自动连接对象 也就是当 调用subscribe(actual) 的数量达到 minSubscribers 时 触发connect()
 		return onAssembly(new FluxAutoConnect<>(this, minSubscribers,
 				cancelSupport));
 	}
@@ -114,6 +120,10 @@ public abstract class ConnectableFlux<T> extends Flux<T> {
 	 */
 	public abstract void connect(Consumer<? super Disposable> cancelSupport);
 
+    /**
+     * 就是生成一个代理对象
+     * @return
+     */
 	@Override
 	public final ConnectableFlux<T> hide() {
 		return new ConnectableFluxHide<>(this);
@@ -142,6 +152,7 @@ public abstract class ConnectableFlux<T> extends Flux<T> {
 	 * @param minSubscribers the number of subscribers expected to subscribe before connection
 	 *
 	 * @return a reference counting {@link Flux}
+     * 该对象内部会管理 订阅数
 	 */
 	public final Flux<T> refCount(int minSubscribers) {
 		return onAssembly(new FluxRefCount<>(this, minSubscribers));

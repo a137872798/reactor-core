@@ -45,23 +45,35 @@ import reactor.util.context.Context;
  * {@link org.reactivestreams.Publisher}.
  *
  * @author Simon Baslé
+ * 订阅者基类
  */
 public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscription,
                                                    Disposable {
 
+	/**
+	 * 订阅对象 内部会包含一个  subscription  该对象像是一个桥梁 内部包含了 Observable 内部的数据
+	 */
 	volatile Subscription subscription;
 
+	/**
+	 * 以原子方式更新内部的 subscription字段
+	 */
 	static AtomicReferenceFieldUpdater<BaseSubscriber, Subscription> S =
 			AtomicReferenceFieldUpdater.newUpdater(BaseSubscriber.class, Subscription.class, "subscription");
 
 	/**
 	 * Return current {@link Subscription}
 	 * @return current {@link Subscription}
+	 * 获取上游对象 默认就是获取 subscription
 	 */
 	protected Subscription upstream() {
 		return subscription;
 	}
 
+	/**
+	 * 如果 该 subscription 已经被关闭 那么 isDisposed 返回true
+	 * @return
+	 */
 	@Override
 	public boolean isDisposed() {
 		return subscription == Operators.cancelledSubscription();
@@ -70,6 +82,7 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 	/**
 	 * {@link Disposable#dispose() Dispose} the {@link Subscription} by
 	 * {@link Subscription#cancel() cancelling} it.
+	 *  订阅者本身实现了 disposable 接口 当调用 dispose 时 就是调用cancel
 	 */
 	@Override
 	public void dispose() {
@@ -84,6 +97,7 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 	 * <p> Defaults to request unbounded Long.MAX_VALUE as in {@link #requestUnbounded()}
 	 *
 	 * @param subscription the subscription to optionally process
+	 *                     从subscription 中 拉取所有的元素
 	 */
 	protected void hookOnSubscribe(Subscription subscription){
 		subscription.request(Long.MAX_VALUE);
@@ -96,6 +110,7 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 	 * <p>Defaults to doing nothing.
 	 *
 	 * @param value the emitted value to process
+	 *              默认情况下 当subscription 内部的元素 往下游传播时  触发的钩子函数为 NOOP
 	 */
 	protected void hookOnNext(T value){
 		// NO-OP
@@ -103,6 +118,7 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 
 	/**
 	 * Optional hook for completion processing. Defaults to doing nothing.
+	 * 当读取到最后一个 元素时触发
 	 */
 	protected void hookOnComplete() {
 		// NO-OP
@@ -113,6 +129,7 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 	 * {@link Exceptions#errorCallbackNotImplemented(Throwable)}.
 	 *
 	 * @param throwable the error to process
+	 *                  在执行过程中 如果遇到了异常情况  选择包装异常后抛出
 	 */
 	protected void hookOnError(Throwable throwable) {
 		throw Exceptions.errorCallbackNotImplemented(throwable);
@@ -121,6 +138,7 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 	/**
 	 * Optional hook executed when the subscription is cancelled by calling this
 	 * Subscriber's {@link #cancel()} method. Defaults to doing nothing.
+	 * 当检测到 subscription 被关闭时触发的钩子
 	 */
 	protected void hookOnCancel() {
 		//NO-OP
@@ -136,17 +154,25 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 	 * @param type the type of termination event that triggered the hook
 	 * ({@link SignalType#ON_ERROR}, {@link SignalType#ON_COMPLETE} or
 	 * {@link SignalType#CANCEL})
+	 *             当触发 onError onComplete cancel 后 最终会触发的钩子
 	 */
 	protected void hookFinally(SignalType type) {
 		//NO-OP
 	}
 
+	/**
+	 * 当调用该方法时 会将subscriber 内部的 subscription 原子更新器 设置为跟定的Subscription
+	 * @param s
+	 */
 	@Override
 	public final void onSubscribe(Subscription s) {
+		// 设置subscriber 内部的 subscription
 		if (Operators.setOnce(S, this, s)) {
 			try {
+				// 成功时 开始从 subscription 中拉取元素 默认是拉取所有元素 也就是 request(Long.MaxValue)
 				hookOnSubscribe(s);
 			}
+			// 当遇到异常时触发对应钩子
 			catch (Throwable throwable) {
 				onError(Operators.onOperatorError(s, throwable, currentContext()));
 			}
@@ -160,14 +186,22 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 			hookOnNext(value);
 		}
 		catch (Throwable throwable) {
+			// Operators.onOperatorError  使用钩子处理获取到的异常
+			// 使用 onError 处理最终版本的异常对象
 			onError(Operators.onOperatorError(subscription, throwable, value, currentContext()));
 		}
 	}
 
+	/**
+	 * 处理异常
+	 * @param t
+	 */
 	@Override
 	public final void onError(Throwable t) {
 		Objects.requireNonNull(t, "onError");
 
+		// 将内部的 subscription 设置成 cancelledSubscription   如果原本就是 cancelledSubscription
+		// 代表异常已经被丢弃了
 		if (S.getAndSet(this, Operators.cancelledSubscription()) == Operators
 				.cancelledSubscription()) {
 			//already cancelled concurrently
@@ -177,23 +211,31 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 
 
 		try {
+			// 抛出异常
 			hookOnError(t);
 		}
 		catch (Throwable e) {
+			// 增加额外的异常信息后 抛出异常
 			e = Exceptions.addSuppressed(e, t);
 			Operators.onErrorDropped(e, currentContext());
 		}
 		finally {
+			// 触发 hookFinish
 			safeHookFinally(SignalType.ON_ERROR);
 		}
 	}
 
+	/**
+	 * 代表在 subscription 层 成功处理完了所有元素
+	 */
 	@Override
 	public final void onComplete() {
+		// 将subscription 设置成cancelledSubscription
 		if (S.getAndSet(this, Operators.cancelledSubscription()) != Operators
 				.cancelledSubscription()) {
 			//we're sure it has not been concurrently cancelled
 			try {
+				// 触发钩子函数
 				hookOnComplete();
 			}
 			catch (Throwable throwable) {
@@ -201,13 +243,19 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 				hookOnError(Operators.onOperatorError(throwable, currentContext()));
 			}
 			finally {
+				// 触发 hookFinish 函数
 				safeHookFinally(SignalType.ON_COMPLETE);
 			}
 		}
 	}
 
+	/**
+	 * 手动触发 subscription.request  原本在 设置subscription 时就会被动触发  request
+	 * @param n
+	 */
 	@Override
 	public final void request(long n) {
+		// 校验数字是否正常 (不能为负数)
 		if (Operators.validate(n)) {
 			Subscription s = this.subscription;
 			if (s != null) {
@@ -218,15 +266,20 @@ public abstract class BaseSubscriber<T> implements CoreSubscriber<T>, Subscripti
 
 	/**
 	 * {@link #request(long) Request} an unbounded amount.
+	 * 尽可能的获取元素 也就是 n = Long.Max_Value
 	 */
 	public final void requestUnbounded() {
 		request(Long.MAX_VALUE);
 	}
 
+	/**
+	 * 关闭 subscriber 对象
+	 */
 	@Override
 	public final void cancel() {
 		if (Operators.terminate(S, this)) {
 			try {
+				// 如果 subscription 已经是 CancelledSubscription 不会触发该钩子
 				hookOnCancel();
 			}
 			catch (Throwable throwable) {

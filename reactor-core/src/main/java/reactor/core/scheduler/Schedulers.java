@@ -63,6 +63,7 @@ import static reactor.core.Exceptions.unwrap;
  * while other factories like {@link #boundedElastic()} return a shared instance - which is the one used by operators requiring that flavor as their default Scheduler.
  *
  * @author Stephane Maldini
+ * 调度器对象工具类
  */
 public abstract class Schedulers {
 
@@ -71,6 +72,7 @@ public abstract class Schedulers {
 	 * and falls back to the number of processors available to the runtime on init.
 	 *
 	 * @see Runtime#availableProcessors()
+	 * 调度池默认大小
 	 */
 	public static final int DEFAULT_POOL_SIZE =
 			Optional.ofNullable(System.getProperty("reactor.schedulers.defaultPoolSize"))
@@ -84,6 +86,7 @@ public abstract class Schedulers {
 	 *
 	 * @see Runtime#availableProcessors()
 	 * @see #boundedElastic()
+	 * 弹性池大小  仅仅指定最大值
 	 */
 	public static final int DEFAULT_BOUNDED_ELASTIC_SIZE =
 			Optional.ofNullable(System.getProperty("reactor.schedulers.defaultBoundedElasticSize"))
@@ -115,6 +118,7 @@ public abstract class Schedulers {
 	 * @param executor an {@link Executor}
 	 *
 	 * @return a new {@link Scheduler}
+	 * 将线程池加工成调度器
 	 */
 	public static Scheduler fromExecutor(Executor executor) {
 		return fromExecutor(executor, false);
@@ -183,6 +187,7 @@ public abstract class Schedulers {
 	 * @return default instance of a {@link Scheduler} that dynamically creates ExecutorService-based
 	 * Workers and caches the threads, reusing them once the Workers have been shut
 	 * down
+	 * 创建弹性线程池 并使用全局静态引用维护
 	 */
 	public static Scheduler elastic() {
 		return cache(CACHED_ELASTIC, ELASTIC, ELASTIC_SUPPLIER);
@@ -220,6 +225,7 @@ public abstract class Schedulers {
 	 *
 	 * @return default instance of a {@link Scheduler} that hosts a fixed pool of single-threaded
 	 * ExecutorService-based workers and is suited for parallel work
+	 * 获取调度器对象  调度器本身包含一个 创建定时任务的api
 	 */
 	public static Scheduler parallel() {
 		return cache(CACHED_PARALLEL, PARALLEL, PARALLEL_SUPPLIER);
@@ -234,6 +240,7 @@ public abstract class Schedulers {
 	 * Scheduler but one doesn't want to change threads.
 	 *
 	 * @return a reusable {@link Scheduler} that executes tasks immediately instead of scheduling them
+	 * 返回一个 会立即执行任务的对象
 	 */
 	public static Scheduler immediate() {
 		return ImmediateScheduler.instance();
@@ -484,9 +491,11 @@ public abstract class Schedulers {
 	 *
 	 * @return a new {@link Scheduler} that hosts a fixed pool of single-threaded
 	 * ExecutorService-based workers and is suited for parallel work
+	 * 生成调度器 对象   parallelism 代表调度池内的线程数
 	 */
 	public static Scheduler newParallel(String name, int parallelism, boolean daemon) {
 		return newParallel(parallelism,
+				// 线程工厂
 				new ReactorThreadFactory(name, ParallelScheduler.COUNTER, daemon,
 						true, Schedulers::defaultUncaughtException));
 	}
@@ -501,6 +510,7 @@ public abstract class Schedulers {
 	 *
 	 * @return a new {@link Scheduler} that hosts a fixed pool of single-threaded
 	 * ExecutorService-based workers and is suited for parallel work
+	 * 创建一个并行调度器
 	 */
 	public static Scheduler newParallel(int parallelism, ThreadFactory threadFactory) {
 		return factory.newParallel(parallelism, threadFactory);
@@ -558,6 +568,7 @@ public abstract class Schedulers {
 	 * case when a fatal error occurs (see {@link Exceptions#throwIfJvmFatal(Throwable)}).
 	 *
 	 * @param c the new hook to set.
+	 *          设置钩子
 	 */
 	public static void onHandleError(BiConsumer<Thread, ? super Throwable> c) {
 		if (log.isDebugEnabled()) {
@@ -726,6 +737,7 @@ public abstract class Schedulers {
 	 * @return the decorated {@link ScheduledExecutorService}, or the original if no decorator is set up
 	 * @see #addExecutorServiceDecorator(String, BiFunction)
 	 * @see #removeExecutorServiceDecorator(String)
+	 * 使用装饰器 包裹jdk 定时器对象
 	 */
 	public static ScheduledExecutorService decorateExecutorService(Scheduler owner, ScheduledExecutorService original) {
 		synchronized (DECORATORS) {
@@ -813,6 +825,7 @@ public abstract class Schedulers {
 	 *
 	 * @param runnable a {@link Runnable} submitted to a {@link Scheduler}
 	 * @return decorated {@link Runnable} if any hook is registered, the original otherwise.
+	 * 尝试加工调度器内的任务
 	 */
 	public static Runnable onSchedule(Runnable runnable) {
 		Function<Runnable, Runnable> hook = onScheduleHook;
@@ -949,6 +962,9 @@ public abstract class Schedulers {
 	// Cached schedulers in atomic references:
 	static AtomicReference<CachedScheduler> CACHED_ELASTIC         = new AtomicReference<>();
 	static AtomicReference<CachedScheduler> CACHED_BOUNDED_ELASTIC = new AtomicReference<>();
+	/**
+	 * 推测是全局范围内的定时器对象 也就是单例模式
+	 */
 	static AtomicReference<CachedScheduler> CACHED_PARALLEL        = new AtomicReference<>();
 	static AtomicReference<CachedScheduler> CACHED_SINGLE          = new AtomicReference<>();
 
@@ -959,6 +975,9 @@ public abstract class Schedulers {
 			() -> newBoundedElastic(DEFAULT_BOUNDED_ELASTIC_SIZE, DEFAULT_BOUNDED_ELASTIC_QUEUESIZE,
 					BOUNDED_ELASTIC, BoundedElasticScheduler.DEFAULT_TTL_SECONDS, true);
 
+	/**
+	 * 该函数用于生成全局范围的  parallelScheduler
+	 */
 	static final Supplier<Scheduler> PARALLEL_SUPPLIER =
 			() -> newParallel(PARALLEL, DEFAULT_POOL_SIZE, true);
 
@@ -987,12 +1006,14 @@ public abstract class Schedulers {
 	 * Note that in case of a race, an extraneous Scheduler can be created, but it'll get
 	 * immediately {@link Scheduler#dispose() disposed}.
 	 * @return a {@link CachedScheduler} to be reused, either pre-existing or created
+	 * 将调度器 包装成一个 缓存调度器
 	 */
 	static CachedScheduler cache(AtomicReference<CachedScheduler> reference, String key, Supplier<Scheduler> supplier) {
 		CachedScheduler s = reference.get();
 		if (s != null) {
 			return s;
 		}
+		// 生成缓存调度器
 		s = new CachedScheduler(key, supplier.get());
 		if (reference.compareAndSet(null, s)) {
 			return s;
@@ -1010,6 +1031,10 @@ public abstract class Schedulers {
 				+ " failed with an uncaught exception", e);
 	}
 
+	/**
+	 * 使用全局钩子处理异常
+	 * @param ex
+	 */
 	static void handleError(Throwable ex) {
 		Thread thread = Thread.currentThread();
 		Throwable t = unwrap(ex);
@@ -1025,9 +1050,18 @@ public abstract class Schedulers {
 		}
 	}
 
+	/**
+	 * 缓存调度器
+	 */
 	static class CachedScheduler implements Scheduler, Supplier<Scheduler>, Scannable {
 
+		/**
+		 * 真正的调度器对象
+		 */
 		final Scheduler cached;
+		/**
+		 * 描述信息
+		 */
 		final String    stringRepresentation;
 
 		CachedScheduler(String key, Scheduler cached) {
@@ -1104,12 +1138,22 @@ public abstract class Schedulers {
 		}
 	}
 
+	/**
+	 * 代表直接启动一个定时任务
+	 * @param exec
+	 * @param task
+	 * @param parent
+	 * @param delay
+	 * @param unit
+	 * @return
+	 */
 	static Disposable directSchedule(ScheduledExecutorService exec,
 			Runnable task,
 			@Nullable Disposable parent,
 			long delay,
 			TimeUnit unit) {
 		task = onSchedule(task);
+		// 将任务封装成 reactor的任务 并交由调度器执行
 		SchedulerTask sr = new SchedulerTask(task, parent);
 		Future<?> f;
 		if (delay <= 0L) {
@@ -1123,6 +1167,15 @@ public abstract class Schedulers {
 		return sr;
 	}
 
+	/**
+	 * 生成周期性任务
+	 * @param exec
+	 * @param task
+	 * @param initialDelay
+	 * @param period
+	 * @param unit
+	 * @return
+	 */
 	static Disposable directSchedulePeriodically(ScheduledExecutorService exec,
 			Runnable task,
 			long initialDelay,
@@ -1153,6 +1206,15 @@ public abstract class Schedulers {
 		}
 	}
 
+	/**
+	 * 使用worker 执行某个任务
+	 * @param exec
+	 * @param tasks
+	 * @param task
+	 * @param delay
+	 * @param unit
+	 * @return
+	 */
 	static Disposable workerSchedule(ScheduledExecutorService exec,
 			Disposable.Composite tasks,
 			Runnable task,

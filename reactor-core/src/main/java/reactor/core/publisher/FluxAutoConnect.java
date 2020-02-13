@@ -30,14 +30,21 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 自动连接对象
  */
 final class FluxAutoConnect<T> extends Flux<T>
 		implements Scannable {
 
+	/**
+	 * 可连接对象
+	 */
 	final ConnectableFlux<? extends T> source;
 
 	final Consumer<? super Disposable> cancelSupport;
 
+	/**
+	 * 代表最少需要多少订阅者
+	 */
 	volatile int remaining;
 	@SuppressWarnings("rawtypes")
 	static final AtomicIntegerFieldUpdater<FluxAutoConnect> REMAINING =
@@ -53,10 +60,15 @@ final class FluxAutoConnect<T> extends Flux<T>
 		this.cancelSupport = Objects.requireNonNull(cancelSupport, "cancelSupport");
 		REMAINING.lazySet(this, n);
 	}
-	
+
+	/**
+	 * 为该对象增加订阅者
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		source.subscribe(actual);
+		// 当 remaining 变成0 时 触发 connect
 		if (remaining > 0 && REMAINING.decrementAndGet(this) == 0) {
 			source.connect(cancelSupport);
 		}

@@ -31,6 +31,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the input value type
  * @param <R> the output value type
+ *           跟 FluxConcatMap 应该是类似的
  */
 final class ParallelConcatMap<T, R> extends ParallelFlux<R> implements Scannable{
 

@@ -46,11 +46,16 @@ final class FluxRepeatPredicate<T> extends InternalFluxOperator<T, T> {
 		actual.onSubscribe(parent);
 
 		if (!parent.isCancelled()) {
+			// 向上游拉取数据
 			parent.resubscribe();
 		}
 		return null;
 	}
 
+	/**
+	 * 订阅者包装对象
+	 * @param <T>
+	 */
 	static final class RepeatPredicateSubscriber<T>
 			extends Operators.MultiSubscriptionSubscriber<T, T> {
 
@@ -79,6 +84,9 @@ final class FluxRepeatPredicate<T> extends InternalFluxOperator<T, T> {
 			actual.onNext(t);
 		}
 
+		/**
+		 * 当数据发射结束后 如果谓语判断为true  重新订阅一次source
+		 */
 		@Override
 		public void onComplete() {
 			boolean b;
@@ -97,6 +105,9 @@ final class FluxRepeatPredicate<T> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 向上游拉取数据
+		 */
 		void resubscribe() {
 			if (WIP.getAndIncrement(this) == 0) {
 				do {

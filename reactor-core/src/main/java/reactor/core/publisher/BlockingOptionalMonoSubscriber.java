@@ -57,8 +57,14 @@ final class BlockingOptionalMonoSubscriber<T> extends CountDownLatch
 	T         value;
 	Throwable error;
 
+	/**
+	 * 订阅者 通过该对象从发布者拉取数据
+	 */
 	Subscription s;
 
+	/**
+	 * 该订阅者是否已经被关闭
+	 */
 	volatile boolean cancelled;
 
 	BlockingOptionalMonoSubscriber() {
@@ -67,6 +73,7 @@ final class BlockingOptionalMonoSubscriber<T> extends CountDownLatch
 
 	@Override
 	public void onNext(T t) {
+		// 当接收到第一个元素后解除阻塞
 		if (value == null) {
 			value = t;
 			countDown();
@@ -81,6 +88,10 @@ final class BlockingOptionalMonoSubscriber<T> extends CountDownLatch
 		countDown();
 	}
 
+	/**
+	 * 设置数据源后 马上触发拉取动作
+	 * @param s
+	 */
 	@Override
 	public final void onSubscribe(Subscription s) {
 		this.s = s;

@@ -32,6 +32,7 @@ import reactor.core.Scannable;
  * Scheduler that works with a single-threaded ScheduledExecutorService and is suited for
  * same-thread work (like an event dispatch thread). This scheduler is time-capable (can
  * schedule with delay / periodically).
+ * 内部只包含一个线程池 所有任务都会提交到该线程池上
  */
 final class SingleScheduler implements Scheduler, Supplier<ScheduledExecutorService>,
                                        Scannable {

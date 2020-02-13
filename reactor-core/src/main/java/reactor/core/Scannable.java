@@ -47,6 +47,7 @@ import reactor.util.function.Tuple2;
  *     implementations.
  *
  * @author Stephane Maldini
+ * 用于检测对象当前状态的接口
  */
 @FunctionalInterface
 public interface Scannable {
@@ -63,6 +64,7 @@ public interface Scannable {
 	 * default.
 	 *
 	 * @param <T> the type of data associated with an attribute
+	 *           代表扫描的状态
 	 */
 	class Attr<T> {
 
@@ -255,7 +257,13 @@ public interface Scannable {
 			return safeConverter.apply(o);
 		}
 
+		/**
+		 * 代表某个 attr 的默认值
+		 */
 		final T                             defaultValue;
+		/**
+		 * 转换函数
+		 */
 		final Function<Object, ? extends T> safeConverter;
 
 		protected Attr(@Nullable T defaultValue){

@@ -33,6 +33,7 @@ import reactor.util.annotation.Nullable;
  * 
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 使用调度器实现解耦
  */
 final class FluxSubscribeOn<T> extends InternalFluxOperator<T, T> {
 
@@ -48,11 +49,17 @@ final class FluxSubscribeOn<T> extends InternalFluxOperator<T, T> {
 		this.requestOnSeparateThread = requestOnSeparateThread;
 	}
 
+	/**
+	 * 当本对象被订阅时 加工订阅者
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super T> actual) {
 		Worker worker;
 
 		try {
+			// 获取调度器的其中一个线程池  (根据不同实现有不同策略)
 			worker = Objects.requireNonNull(scheduler.createWorker(),
 					"The scheduler returned a null Function");
 		} catch (Throwable e) {
@@ -60,8 +67,10 @@ final class FluxSubscribeOn<T> extends InternalFluxOperator<T, T> {
 			return null;
 		}
 
+		// 加工订阅者对象 并拉取数据
 		SubscribeOnSubscriber<T> parent = new SubscribeOnSubscriber<>(source,
 				actual, worker, requestOnSeparateThread);
+		// 子类向上游对象拉取数据
 		actual.onSubscribe(parent);
 
 		try {
@@ -73,17 +82,28 @@ final class FluxSubscribeOn<T> extends InternalFluxOperator<T, T> {
 						actual.currentContext()));
 			}
 		}
+		// 返回null 时 父类的模板中 subscribe()  就会直接返回了 也就是此时调用 subscribe() 的线程 已经可以单独执行下面的任务了
+		// 订阅者会通过另一个线程 自动的获取到数据
 		return null;
 	}
 
 	static final class SubscribeOnSubscriber<T>
 			implements InnerOperator<T, T>, Runnable {
 
+		/**
+		 * 关联到下游
+		 */
 		final CoreSubscriber<? super T> actual;
 
+		/**
+		 * 关联到上游
+		 */
 		final CorePublisher<? extends T> source;
 
 		final Worker  worker;
+		/**
+		 * 代表是否需要切换特定的线程来执行request
+		 */
 		final boolean requestOnSeparateThread;
 
 		volatile Subscription s;
@@ -108,6 +128,13 @@ final class FluxSubscribeOn<T> extends InternalFluxOperator<T, T> {
 						Thread.class,
 						"thread");
 
+		/**
+		 * 加工后的订阅者
+		 * @param source
+		 * @param actual
+		 * @param worker
+		 * @param requestOnSeparateThread
+		 */
 		SubscribeOnSubscriber(CorePublisher<? extends T> source, CoreSubscriber<? super T> actual,
 				Worker worker, boolean requestOnSeparateThread) {
 			this.actual = actual;
@@ -116,6 +143,10 @@ final class FluxSubscribeOn<T> extends InternalFluxOperator<T, T> {
 			this.requestOnSeparateThread = requestOnSeparateThread;
 		}
 
+		/**
+		 * 当设置上游数据时  发现存在requested 那么就从上游拉取数据
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.setOnce(S, this, s)) {
@@ -126,12 +157,18 @@ final class FluxSubscribeOn<T> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 从上游对象拉取数据
+		 * @param n
+		 * @param s
+		 */
 		void requestUpstream(final long n, final Subscription s) {
 			if (!requestOnSeparateThread || Thread.currentThread() == THREAD.get(this)) {
 				s.request(n);
 			}
 			else {
 				try {
+					// 这里再次提交任务 也就意味着又会将任务提交到线程池  那么很可能分配到的线程已经变换了
 					worker.schedule(() -> s.request(n));
 				}
 				catch (RejectedExecutionException ree) {
@@ -167,9 +204,14 @@ final class FluxSubscribeOn<T> extends InternalFluxOperator<T, T> {
 			worker.dispose();
 		}
 
+		/**
+		 * 下游申请拉取数据
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
+				// 如果已经设置了上游对象 就从上游开始拉取数据
 				Subscription s = S.get(this);
 				if (s != null) {
 					requestUpstream(n, s);
@@ -188,6 +230,9 @@ final class FluxSubscribeOn<T> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 指定当前执行任务的线程 同时促是上游发射数据
+		 */
 		@Override
 		public void run() {
 			THREAD.lazySet(this, Thread.currentThread());

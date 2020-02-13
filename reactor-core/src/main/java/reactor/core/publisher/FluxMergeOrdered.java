@@ -42,6 +42,7 @@ import reactor.util.concurrent.Queues;
  * @param <T> the value type
  * @author David Karnok
  * @author Simon Baslé
+ * 该对象处理上游数据时 会排序
  */
 //source: https://akarnokd.blogspot.fr/2017/09/java-9-flow-api-ordered-merge.html
 final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
@@ -107,19 +108,34 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 		return null;
 	}
 
+	/**
+	 * 设置订阅者
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		MergeOrderedMainProducer<T> main = new MergeOrderedMainProducer<>(actual, valueComparator, prefetch, sources.length);
+		// 触发main 的request 方法
 		actual.onSubscribe(main);
 		main.subscribe(sources);
 	}
 
 
+	/**
+	 * 顺序接收上游数据
+	 * @param <T>
+	 */
 	static final class MergeOrderedMainProducer<T> implements InnerProducer<T> {
 
 		static final Object DONE = new Object();
 
+		/**
+		 * 真正的订阅者对象
+		 */
 		final CoreSubscriber<? super T> actual;
+		/**
+		 * 用于接收上游发来的数据 并在这一层做排序
+		 */
 		final MergeOrderedInnerSubscriber<T>[] subscribers;
 		final Comparator<? super T> comparator;
 		final Object[] values;
@@ -160,6 +176,10 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 			this.values = new Object[n];
 		}
 
+		/**
+		 * 设置上游对象
+		 * @param sources
+		 */
 		void subscribe(Publisher<? extends T>[] sources) {
 			if (sources.length != subscribers.length) {
 				throw new IllegalArgumentException("must subscribe with " + subscribers.length + " sources");
@@ -175,6 +195,10 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 			return this.actual;
 		}
 
+		/**
+		 * 当订阅者 从该对象拉取数据时触发
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			Operators.addCap(REQUESTED, this, n);
@@ -203,6 +227,9 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 			drain();
 		}
 
+		/**
+		 * 当 子对象接收到上游的数据时触发
+		 */
 		void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
 				return;
@@ -212,6 +239,7 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 			CoreSubscriber<? super T> actual = this.actual;
 			Comparator<? super T> comparator = this.comparator;
 
+			// 该数组是一开始就初始化完毕的 而 FluxFlatMap 是 惰性创建
 			MergeOrderedInnerSubscriber<T>[] subscribers = this.subscribers;
 			int n = subscribers.length;
 
@@ -223,6 +251,7 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 				long r = requested;
 
 				for (;;) {
+					// 代表已经被关闭了
 					if (cancelled != 0) {
 						Arrays.fill(values, null);
 
@@ -243,6 +272,7 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 						else if (o == null) {
 							boolean innerDone = subscribers[i].done;
 							o = subscribers[i].queue.poll();
+							// 保存最新的数据
 							if (o != null) {
 								values[i] = o;
 								nonEmpty++;
@@ -258,6 +288,7 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 						}
 					}
 
+					// 代表数据都处理完了
 					if (done == n) {
 						Throwable ex = error;
 						if (ex == null) {
@@ -299,6 +330,8 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 						i++;
 					}
 
+					// 不是等到 每个pub 数据发送完了 才开始排序 而是每个pub 至少发送一个数据后开始排序 之后每消费一个 再等待一个新数据
+					// 实际上上游数据本身就应该排序完毕 这样才符合应用场景
 					values[minIndex] = null;
 
 					actual.onNext(min);
@@ -338,6 +371,9 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 
 		volatile boolean done;
 
+		/**
+		 * 该对象内部包含了上游数据
+		 */
 		volatile Subscription s;
 		AtomicReferenceFieldUpdater<MergeOrderedInnerSubscriber, Subscription> S =
 				AtomicReferenceFieldUpdater.newUpdater(MergeOrderedInnerSubscriber.class, Subscription.class, "s");
@@ -357,6 +393,10 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 			}
 		}
 
+		/**
+		 * 往下游发射数据 这里先做了一次存储 便于排序
+		 * @param item
+		 */
 		@Override
 		public void onNext(T item) {
 			queue.offer(item);

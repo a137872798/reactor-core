@@ -27,6 +27,7 @@ import reactor.util.annotation.Nullable;
 
 /**
  * @author Stephane Maldini
+ * Pub Flux 适配器
  */
 final class FluxSourceFuseable<I> extends Flux<I> implements Fuseable, SourceProducer<I>,
                                                              OptimizableOperator<I, I> {

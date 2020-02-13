@@ -21,11 +21,13 @@ package reactor.core.publisher;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">https://github.com/reactor/reactive-streams-commons</a>
+ * 阻塞 直到 获取到首个上游元素后 解除的 订阅者
  */
 final class BlockingFirstSubscriber<T> extends BlockingSingleSubscriber<T> {
 
 	@Override
 	public void onNext(T t) {
+		// 一旦 接收到第一个元素 就丢弃 subscription 且 解除阻塞
 		if (value == null) {
 			value = t;
 			dispose();
@@ -33,6 +35,10 @@ final class BlockingFirstSubscriber<T> extends BlockingSingleSubscriber<T> {
 		}
 	}
 
+	/**
+	 * 当检测到异常时 解除阻塞
+	 * @param t
+	 */
 	@Override
 	public void onError(Throwable t) {
 		if (value == null) {

@@ -32,6 +32,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the source value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 根据 上游flux 是否有某个数据满足 谓语条件 决定传播到下游的值
  */
 final class MonoAny<T> extends MonoFromFluxOperator<T, Boolean>
 		implements Fuseable {
@@ -102,6 +103,7 @@ final class MonoAny<T> extends MonoFromFluxOperator<T, Boolean>
 				actual.onError(Operators.onOperatorError(s, e, t, actual.currentContext()));
 				return;
 			}
+			// 只要有一个数据满足谓语条件   以 true 触发下游数据
 			if (b) {
 				done = true;
 				s.cancel();

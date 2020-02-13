@@ -35,6 +35,7 @@ import reactor.util.context.Context;
  * @param <U> the value type of the other Publisher
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">https://github.com/reactor/reactive-streams-commons</a>
+ *
  */
 final class FluxSkipUntilOther<T, U> extends InternalFluxOperator<T, T> {
 
@@ -47,15 +48,21 @@ final class FluxSkipUntilOther<T, U> extends InternalFluxOperator<T, T> {
 
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super T> actual) {
+		// 包装订阅者
 		SkipUntilMainSubscriber<T> mainSubscriber = new SkipUntilMainSubscriber<>(actual);
 
 		SkipUntilOtherSubscriber<U> otherSubscriber = new SkipUntilOtherSubscriber<>(mainSubscriber);
 
 		other.subscribe(otherSubscriber);
 
+		// 该方法调用后会触发 source.subscribe(mainSubscriber)
 		return mainSubscriber;
 	}
 
+	/**
+	 * 该对象订阅另一个数据源
+	 * @param <U>
+	 */
 	static final class SkipUntilOtherSubscriber<U> implements InnerConsumer<U> {
 
 		final SkipUntilMainSubscriber<?> main;
@@ -86,11 +93,16 @@ final class FluxSkipUntilOther<T, U> extends InternalFluxOperator<T, T> {
 			s.request(Long.MAX_VALUE);
 		}
 
+		/**
+		 * 当传入的另一个pub 发射数据时
+		 * @param t
+		 */
 		@Override
 		public void onNext(U t) {
 			if (main.gate) {
 				return;
 			}
+			// 一旦该对象下发数据 就允许main 接收上游数据 否则 main 会跳过 接收到的数据
 			SkipUntilMainSubscriber<?> m = main;
 			m.other.cancel();
 			m.gate = true;
@@ -120,6 +132,10 @@ final class FluxSkipUntilOther<T, U> extends InternalFluxOperator<T, T> {
 
 	}
 
+	/**
+	 * 该对象用于接收 上游数据
+	 * @param <T>
+	 */
 	static final class SkipUntilMainSubscriber<T>
 			implements InnerOperator<T, T> {
 
@@ -202,6 +218,10 @@ final class FluxSkipUntilOther<T, U> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 默认情况下 gate 为false 也就是不接受上游数据 必须要等到other 发射数据后 gate 才修改为 true
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (gate) {

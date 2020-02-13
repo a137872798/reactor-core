@@ -32,6 +32,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the source value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 计算谓语的结果 并传播到下游
  */
 final class MonoAll<T> extends MonoFromFluxOperator<T, Boolean>
 		implements Fuseable {
@@ -43,16 +44,32 @@ final class MonoAll<T> extends MonoFromFluxOperator<T, Boolean>
 		this.predicate = Objects.requireNonNull(predicate, "predicate");
 	}
 
+	/**
+	 * 当该对象设置订阅者时 包装订阅者  使得上游订阅该对象
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super Boolean> actual) {
 		return new AllSubscriber<T>(actual, predicate);
 	}
 
+	/**
+	 * 当上游订阅该对象时  又将该对象 与上游数据包装成 subscription 并设置到 该对象的 s 字段中 注意上游数据是 flux 因为MonoAll是将
+	 * flux 适配成了 mono
+	 * @param <T>
+	 */
 	static final class AllSubscriber<T> extends Operators.MonoSubscriber<T, Boolean> {
 		final Predicate<? super T> predicate;
 
+		/**
+		 * 包含本对象 已经上游的 flux 对象
+		 */
 		Subscription s;
 
+		/**
+		 * 是否已经处理完毕
+		 */
 		boolean done;
 
 		AllSubscriber(CoreSubscriber<? super Boolean> actual, Predicate<? super T> predicate) {
@@ -75,19 +92,29 @@ final class MonoAll<T> extends MonoFromFluxOperator<T, Boolean>
 			super.cancel();
 		}
 
+		/**
+		 * 为该对象设置订阅者
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
+				// 通过实际的订阅者 触发该对象的 request 方法
 				actual.onSubscribe(this);
 
+				// 该方法会触发 flux 的 request 并接收上游数据 之后触发onNext
 				s.request(Long.MAX_VALUE);
 			}
 		}
 
+		/**
+		 * 接收到上游的数据
+		 */
 		@Override
 		public void onNext(T t) {
 
+			// 代表 关闭 或者已经处理过数据了  先忽略
 			if (done) {
 				return;
 			}
@@ -95,16 +122,19 @@ final class MonoAll<T> extends MonoFromFluxOperator<T, Boolean>
 			boolean b;
 
 			try {
+				// 通过谓语对象 生成结果  看来该方法会接收 flux 的所有数据 并通过该谓语对象去判断 只要有一个不符合条件 就不满足 all的条件
 				b = predicate.test(t);
 			} catch (Throwable e) {
 				done = true;
 				actual.onError(Operators.onOperatorError(s, e, t, actual.currentContext()));
 				return;
 			}
+			// 代表上游的 flux 没有全部满足条件
 			if (!b) {
 				done = true;
 				s.cancel();
 
+				// 触发函数
 				complete(false);
 			}
 		}
@@ -120,6 +150,7 @@ final class MonoAll<T> extends MonoFromFluxOperator<T, Boolean>
 			actual.onError(t);
 		}
 
+		// 代表 上游所有数据 都满足条件
 		@Override
 		public void onComplete() {
 			if (done) {

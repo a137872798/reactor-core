@@ -28,6 +28,7 @@ import reactor.util.context.Context;
 
 /**
  * @see <a href="https://github.com/reactor/reactive-streams-commons">https://github.com/reactor/reactive-streams-commons</a>
+ * 单订阅者 同时继承于栅栏对象  该对象走的不是 baseSubscriber 这套
  */
 abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 		implements InnerConsumer<T>, Disposable {
@@ -35,14 +36,24 @@ abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 	T         value;
 	Throwable error;
 
+	/**
+	 * 订阅者 通过该对象与  observable 交互
+	 */
 	Subscription s;
 
+	/**
+	 * 判断该对象是否被关闭
+	 */
 	volatile boolean cancelled;
 
 	BlockingSingleSubscriber() {
 		super(1);
 	}
 
+	/**
+	 * 在设置subscription 的同时 拉取所有元素
+	 * @param s
+	 */
 	@Override
 	public final void onSubscribe(Subscription s) {
 		this.s = s;
@@ -51,6 +62,9 @@ abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 		}
 	}
 
+	/**
+	 * 当处理完内部所有元素时 解除 阻塞状态
+	 */
 	@Override
 	public final void onComplete() {
 		countDown();
@@ -61,11 +75,15 @@ abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 		return Context.empty();
 	}
 
+	/**
+	 * 丢弃该对象
+	 */
 	@Override
 	public final void dispose() {
 		cancelled = true;
 		Subscription s = this.s;
 		if (s != null) {
+			// 优先置空 再关闭 是一个好的技巧 不然 其他线程访问到 s 此时 s 会处在一个不确定的状态
 			this.s = null;
 			s.cancel();
 		}
@@ -76,6 +94,7 @@ abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 	 * return null for an empty source and rethrow any exception.
 	 *
 	 * @return the first value or null if the source is empty
+	 * 阻塞 并等待获取到数据
 	 */
 	@Nullable
 	final T blockingGet() {
@@ -86,12 +105,15 @@ abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 			try {
 				await();
 			}
+			// 该线程被外部唤醒时 触发
 			catch (InterruptedException ex) {
+				// 丢弃该 subscription
 				dispose();
 				throw Exceptions.propagate(ex);
 			}
 		}
 
+		// 判断 获取到元素时 是否发现了异常
 		Throwable e = error;
 		if (e != null) {
 			RuntimeException re = Exceptions.propagate(e);
@@ -99,6 +121,7 @@ abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 			re.addSuppressed(new Exception("#block terminated with an error"));
 			throw re;
 		}
+		// 返回获取到的首个值
 		return value;
 	}
 
@@ -110,6 +133,7 @@ abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 	 * @param unit the time unit
 	 *
 	 * @return the first value or null if the source is empty
+	 * 阻塞指定时间
 	 */
 	@Nullable
 	final T blockingGet(long timeout, TimeUnit unit) {
@@ -143,7 +167,11 @@ abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 	}
 
 
-
+	/**
+	 * 通过传入的 状态Key 获取当前状态
+	 * @param key a {@link Attr} to resolve for the component.
+	 * @return
+	 */
 	@Override
 	@Nullable
 	public Object scanUnsafe(Attr key) {
@@ -156,6 +184,11 @@ abstract class BlockingSingleSubscriber<T> extends CountDownLatch
 		return null;
 	}
 
+	/**
+	 * getCount == 0 代表已经获取到元素了 该对象就可以被关闭了
+	 *
+	 * @return
+	 */
 	@Override
 	public boolean isDisposed() {
 		return cancelled || getCount() == 0;

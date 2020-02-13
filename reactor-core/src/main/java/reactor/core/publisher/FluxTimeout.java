@@ -59,6 +59,9 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 		this.itemTimeout = Objects.requireNonNull(itemTimeout, "itemTimeout");
 		this.other = null;
 
+		/**
+		 * 生成描述信息
+		 */
 		this.timeoutDescription = addNameToTimeoutDescription(source,
 				Objects.requireNonNull(timeoutDescription, "timeoutDescription is needed when no fallback"));
 	}
@@ -76,19 +79,25 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super T> actual) {
+		// 确保订阅者 以串行形式触发 onNext()
 		CoreSubscriber<T> serial = Operators.serialize(actual);
 
 		TimeoutMainSubscriber<T, V> main =
 				new TimeoutMainSubscriber<>(serial, itemTimeout, other, timeoutDescription);
 
+		// 触发main 对象的 request
 		serial.onSubscribe(main);
 
+		// 包装一个超时对象
 		TimeoutTimeoutSubscriber ts = new TimeoutTimeoutSubscriber(main, 0L);
 
+		// 设置超时对象
 		main.setTimeout(ts);
 
+		// 向第一个超时数据源拉取数据
 		firstTimeout.subscribe(ts);
 
+		// 数据源之后会向main 下发数据
 		return main;
 	}
 
@@ -108,6 +117,11 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 		}
 	}
 
+	/**
+	 * 被包装的订阅者对象
+	 * @param <T>
+	 * @param <V>
+	 */
 	static final class TimeoutMainSubscriber<T, V>
 			extends Operators.MultiSubscriptionSubscriber<T, T> {
 
@@ -141,6 +155,10 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 			this.timeoutDescription = timeoutDescription;
 		}
 
+		/**
+		 * 接收 source 的数据
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
@@ -155,22 +173,29 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 			return true;
 		}
 
+		/**
+		 * 接收上游发射的数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			timeout.cancel();
 
 			long idx = index;
+			// 代表已经超时了 现在不做处理
 			if (idx == Long.MIN_VALUE) {
 				s.cancel();
 				Operators.onNextDropped(t, actual.currentContext());
 				return;
 			}
+			// 代表已经发射了下一个数据 每次发射一个 index 就会递增 同时存在另一个用于检测 本对象是否超时未发送数据
 			if (!INDEX.compareAndSet(this, idx, idx + 1)) {
 				s.cancel();
 				Operators.onNextDropped(t, actual.currentContext());
 				return;
 			}
 
+			// 正常将数据发送到下游
 			actual.onNext(t);
 
 			producedOne();
@@ -178,6 +203,7 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 			Publisher<? extends V> p;
 
 			try {
+				// 接收到的数据 又作为一个新的超时检测对象 在一定延时后会检测本对象是否接收到新数据
 				p = Objects.requireNonNull(itemTimeout.apply(t),
 						"The itemTimeout returned a null Publisher");
 			}
@@ -245,6 +271,11 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 			super.cancel();
 		}
 
+		/**
+		 * 设置超时回调对象
+		 * @param newTimeout
+		 * @return
+		 */
 		boolean setTimeout(IndexedCancellable newTimeout) {
 
 			for (; ; ) {
@@ -269,7 +300,12 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 检测 index 为 i 的数据是否已经发射
+		 * @param i
+		 */
 		void doTimeout(long i) {
+			// 匹配的情况下才有检测的必要
 			if (index == i && INDEX.compareAndSet(this, i, Long.MIN_VALUE)) {
 				handleTimeout();
 			}
@@ -283,7 +319,11 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 当定时检测器已经接收到数据(代表经过了一个检测的周期)  检测当前pub 是否正常下发数据
+		 */
 		void handleTimeout() {
+			// 查看是否有降级措施
 			if (other == null) {
 				super.cancel();
 				actual.onError(new TimeoutException("Did not observe any item or terminal signal within "
@@ -292,6 +332,7 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 			else {
 				set(Operators.emptySubscription());
 
+				// 使用降级对象作为数据源
 				other.subscribe(new TimeoutOtherSubscriber<>(actual, this));
 			}
 		}
@@ -357,6 +398,9 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 
 	}
 
+	/**
+	 * 超时对象
+	 */
 	static final class TimeoutTimeoutSubscriber
 			implements Subscriber<Object>, IndexedCancellable {
 
@@ -371,11 +415,20 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 				Subscription.class,
 				"s");
 
+		/**
+		 *
+		 * @param main
+		 * @param index  默认为0
+		 */
 		TimeoutTimeoutSubscriber(TimeoutMainSubscriber<?, ?> main, long index) {
 			this.main = main;
 			this.index = index;
 		}
 
+		/**
+		 * 连接到 firstTimeout
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (!S.compareAndSet(this, null, s)) {
@@ -389,6 +442,10 @@ final class FluxTimeout<T, U, V> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 接收数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(Object t) {
 			s.cancel();

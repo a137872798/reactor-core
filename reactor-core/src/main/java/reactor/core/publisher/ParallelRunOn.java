@@ -32,7 +32,10 @@ import reactor.util.annotation.Nullable;
  */
 final class ParallelRunOn<T> extends ParallelFlux<T> implements Scannable{
 	final ParallelFlux<? extends T> source;
-	
+
+	/**
+	 * 使用调度器实现异步
+	 */
 	final Scheduler scheduler;
 
 	final int prefetch;

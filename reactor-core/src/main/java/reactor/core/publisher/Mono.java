@@ -99,6 +99,7 @@ import reactor.util.function.Tuples;
  * @author David Karnok
  * @author Simon Baslé
  * @see Flux
+ * 该对象 仅会往下游发射一个数据   大多数实现跟flux一致
  */
 public abstract class Mono<T> implements CorePublisher<T> {
 
@@ -180,6 +181,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param callback Consume the {@link MonoSink} provided per-subscriber by Reactor to generate signals.
 	 * @param <T> The type of the value emitted
 	 * @return a {@link Mono}
+	 * 这个灵活性比较强 模板由用户来定义 看的意义不大
 	 */
 	public static <T> Mono<T> create(Consumer<MonoSink<T>> callback) {
 	    return onAssembly(new MonoCreate<>(callback));
@@ -196,6 +198,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param <T> the element type of the returned Mono instance
 	 * @return a new {@link Mono} factory
 	 * @see #deferWithContext(Function)
+	 * 通过函数生成数据源 并下发
 	 */
 	public static <T> Mono<T> defer(Supplier<? extends Mono<? extends T>> supplier) {
 		return onAssembly(new MonoDefer<>(supplier));
@@ -247,6 +250,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param timer a time-capable {@link Scheduler} instance to run on
 	 *
 	 * @return a new {@link Mono}
+	 * 当延迟了指定的时间后下发元素   只会下发一个 0
 	 */
 	public static Mono<Long> delay(Duration duration, Scheduler timer) {
 		return onAssembly(new MonoDelay(duration.toMillis(), TimeUnit.MILLISECONDS, timer));
@@ -308,6 +312,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param <T> The type of the function result.
 	 *
 	 * @return a new {@link Mono} behaving like the fastest of its sources.
+	 * 多个 mono  谁下发送数据 下游就接收谁
 	 */
 	@SafeVarargs
 	public static <T> Mono<T> first(Mono<? extends T>... monos) {
@@ -373,6 +378,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param <T> type of the expected value
 	 *
 	 * @return A {@link Mono}.
+	 * 通过 一个 callable 来生成数据 并下发
 	 */
 	public static <T> Mono<T> fromCallable(Callable<? extends T> supplier) {
 		return onAssembly(new MonoCallable<>(supplier));
@@ -466,6 +472,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param <T> type of the expected value
 	 * @return A {@link Mono}.
 	 * @see #fromCompletionStage(CompletionStage) fromCompletionStage for a generalization
+	 * 将 future 的结果作为 mono下发的数据
 	 */
 	public static <T> Mono<T> fromFuture(CompletableFuture<? extends T> future) {
 		return onAssembly(new MonoCompletionStage<>(future));
@@ -972,6 +979,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param sources The sources to use.
 	 *
 	 * @return a {@link Mono}.
+	 * 当所有的 source 都触发 onComplete 后    最后该对象会直接触发订阅者的 onComplete
 	 */
 	public static Mono<Void> when(Publisher<?>... sources) {
 		if (sources.length == 0) {
@@ -1655,6 +1663,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * might miss signal from hot publishers.
 	 *
 	 * @return T the result
+	 * 调用 block 会直接阻塞当前线程 所以必须配合 subscribeOn 来实现线程间的解耦
 	 */
 	@Nullable
 	public T block() {
@@ -2291,6 +2300,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param onNext the callback to call on {@link Subscriber#onNext}
 	 *
 	 * @return a new {@link Mono}
+	 * 当触发 onNext 时 会通过 consumer 来处理内部元素
 	 */
 	public final Mono<T> doOnNext(Consumer<? super T> onNext) {
 		Objects.requireNonNull(onNext, "onNext");
@@ -4718,6 +4728,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param source the source to apply assembly hooks onto
 	 *
 	 * @return the source, potentially wrapped with assembly time cross-cutting behavior
+	 * 包装 source 对象
 	 */
 	@SuppressWarnings("unchecked")
 	protected static <T> Mono<T> onAssembly(Mono<T> source) {

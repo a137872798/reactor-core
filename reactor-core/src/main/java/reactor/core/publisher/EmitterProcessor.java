@@ -50,6 +50,7 @@ import static reactor.core.publisher.FluxPublish.PublishSubscriber.TERMINATED;
  * @param <T> the input and output value type
  *
  * @author Stephane Maldini
+ * processor对象同时作为 pub 和 sub 用户可以直接调用 onNext 等向内部的订阅者发送数据
  */
 public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 
@@ -146,6 +147,10 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 					Throwable.class,
 					"error");
 
+	/**
+	 * @param autoCancel  是否自动关闭
+	 * @param prefetch   选择合适的 request 大小
+	 */
 	EmitterProcessor(boolean autoCancel, int prefetch) {
 		if (prefetch < 1) {
 			throw new IllegalArgumentException("bufferSize must be strictly positive, " + "was: " + prefetch);
@@ -154,6 +159,7 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 		this.prefetch = prefetch;
 		//doesn't use INIT/CANCELLED distinction, contrary to FluxPublish)
 		//see remove()
+		// 初始状态还没有设置订阅者
 		SUBSCRIBERS.lazySet(this, EMPTY);
 	}
 
@@ -162,20 +168,28 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 		return Stream.of(subscribers);
 	}
 
+	/**
+	 * 为该对象设置订阅者
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		Objects.requireNonNull(actual, "subscribe");
+		// 包装订阅者对象
 		EmitterInner<T> inner = new EmitterInner<>(actual, this);
 		actual.onSubscribe(inner);
 
+		// 如果该对象已经被关闭 忽略
 		if (inner.isCancelled()) {
 			return;
 		}
 
+		// 添加到 subscribers[] 中
 		if (add(inner)) {
 			if (inner.isCancelled()) {
 				remove(inner);
 			}
+			// 从parent 拉取数据
 			drain();
 		}
 		else {
@@ -193,12 +207,17 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 	 * Return the number of parked elements in the emitter backlog.
 	 *
 	 * @return the number of parked elements in the emitter backlog.
+	 * 获取囤积的待处理数据
 	 */
 	public int getPending() {
 		Queue<T> q = queue;
 		return q != null ? q.size() : 0;
 	}
 
+	/**
+	 * 当该对象作为一个订阅者时
+	 * @param s
+	 */
 	@Override
 	public void onSubscribe(final Subscription s) {
 		if (Operators.setOnce(S, this, s)) {
@@ -223,10 +242,15 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 
 			queue = Queues.<T>get(prefetch).get();
 
+			// 向数据源请求数据
 			s.request(Operators.unboundedOrPrefetch(prefetch));
 		}
 	}
 
+	/**
+	 * 当该对象作为订阅者时 向上游拉取数据
+	 * @param t
+	 */
 	@Override
 	@SuppressWarnings("unchecked")
 	public void onNext(T t) {
@@ -262,6 +286,7 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 			}
 		}
 
+		// 上游拉取的数据会保存到队列中  也就是该对象跟 replayFlux 很像 都是作为一个中转站 让下游订阅者共享数据
 		while (!q.offer(t)) {
 			LockSupport.parkNanos(10);
 		}
@@ -332,6 +357,9 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 		return super.scanUnsafe(key);
 	}
 
+	/**
+	 * 将队列中的元素 下发到子订阅者
+	 */
 	final void drain() {
 		if (WIP.getAndIncrement(this) != 0) {
 			return;
@@ -359,6 +387,7 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 				int len = a.length;
 				int cancel = 0;
 
+				// 获取最小的请求数 并按照这个数量下发数据
 				for (FluxPublish.PubSubInner<T> inner : a) {
 					long r = inner.requested;
 					if (r >= 0L) {
@@ -561,6 +590,10 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 		return subscribers.length;
 	}
 
+	/**
+	 * 当为父对象设置订阅者时 会生成一个该对象
+	 * @param <T>
+	 */
 	static final class EmitterInner<T> extends FluxPublish.PubSubInner<T> {
 
 		final EmitterProcessor<T> parent;
@@ -570,6 +603,7 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 			this.parent = parent;
 		}
 
+		// 当该对象订阅上游数据时 会触发该方法
 		@Override
 		void drainParent() {
 			parent.drain();

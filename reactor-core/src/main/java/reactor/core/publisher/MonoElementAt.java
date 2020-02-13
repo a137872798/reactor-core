@@ -28,6 +28,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 将flux 指定下标的元素下发
  */
 final class MonoElementAt<T> extends MonoFromFluxOperator<T, T>
 		implements Fuseable {
@@ -139,6 +140,9 @@ final class MonoElementAt<T> extends MonoFromFluxOperator<T, T>
 			actual.onError(t);
 		}
 
+		/**
+		 * 代表 flux 的元素没有达到index 那么就用默认值来触发 或者就是抛出异常
+		 */
 		@Override
 		public void onComplete() {
 			if (done) {

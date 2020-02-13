@@ -32,9 +32,13 @@ import reactor.util.annotation.Nullable;
  * Periodically emits an ever increasing long value either via a ScheduledExecutorService
  * or a custom async callback function
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 通过调度器对象定时往下游发送数据
  */
 final class FluxInterval extends Flux<Long> implements SourceProducer<Long> {
 
+	/**
+	 * 调度器对象  每个对象内部包含一个 jdk 定时器数组
+	 */
 	final Scheduler timedScheduler;
 	
 	final long initialDelay;
@@ -56,16 +60,23 @@ final class FluxInterval extends Flux<Long> implements SourceProducer<Long> {
 		this.unit = Objects.requireNonNull(unit, "unit");
 		this.timedScheduler = Objects.requireNonNull(timedScheduler, "timedScheduler");
 	}
-	
+
+	/**
+	 * 当为该对象设置订阅者时
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super Long> actual) {
+		// 生成worker 对象 该对象会维护一组任务
 		Worker w = timedScheduler.createWorker();
 
+		// 包装 subscription 对象
 		IntervalRunnable r = new IntervalRunnable(actual, w);
 
 		actual.onSubscribe(r);
 
 		try {
+			// 间接触发内部的 run()
 			w.schedulePeriodically(r, initialDelay, period, unit);
 		}
 		catch (RejectedExecutionException ree) {
@@ -83,16 +94,28 @@ final class FluxInterval extends Flux<Long> implements SourceProducer<Long> {
 		return null;
 	}
 
+	/**
+	 * 该对象作为 订阅者的数据源
+	 */
 	static final class IntervalRunnable implements Runnable, Subscription,
 	                                               InnerProducer<Long> {
 		final CoreSubscriber<? super Long> actual;
 
+		/**
+		 * 该对象用于生成数据
+		 */
 		final Worker worker;
 
+		/**
+		 * 代表下游向上游申请了多少数据
+		 */
 		volatile long requested;
 		static final AtomicLongFieldUpdater<IntervalRunnable> REQUESTED =
 				AtomicLongFieldUpdater.newUpdater(IntervalRunnable.class, "requested");
 
+		/**
+		 * 每次向下游发送的就是count  每次发送递增
+		 */
 		long count;
 
 		volatile boolean cancelled;
@@ -116,9 +139,13 @@ final class FluxInterval extends Flux<Long> implements SourceProducer<Long> {
 			return InnerProducer.super.scanUnsafe(key);
 		}
 
+		/**
+		 * worker 执行该对象时的逻辑
+		 */
 		@Override
 		public void run() {
 			if (!cancelled) {
+				// 代表下游还有请求数未消去
 				if (requested != 0L) {
 					actual.onNext(count++);
 					if (requested != Long.MAX_VALUE) {

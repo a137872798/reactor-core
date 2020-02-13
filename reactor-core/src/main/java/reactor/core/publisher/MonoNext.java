@@ -65,6 +65,10 @@ final class MonoNext<T> extends MonoFromFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 只接收第一个数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {

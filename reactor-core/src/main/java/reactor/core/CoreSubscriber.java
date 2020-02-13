@@ -32,6 +32,7 @@ import reactor.util.context.Context;
  * @param <T> the {@link Subscriber} data type
  *
  * @since 3.1.0
+ * 该接口用于拓展订阅者
  */
 public interface CoreSubscriber<T> extends Subscriber<T> {
 
@@ -40,6 +41,7 @@ public interface CoreSubscriber<T> extends Subscriber<T> {
 	 * operators during subscribing or a terminal {@link org.reactivestreams.Subscriber}.
 	 *
 	 * @return a resolved context or {@link Context#empty()}
+	 * 获取本次响应式处理中的 上下文 实际上内部就是维护键值对   默认情况下返回empty() 代表内部部包含任何键值对
 	 */
 	default Context currentContext(){
 		return Context.empty();
@@ -55,6 +57,7 @@ public interface CoreSubscriber<T> extends Subscriber<T> {
 	 *    {@link reactor.util.Logger}.
 	 *
 	 * {@inheritDoc}
+	 * subscription 内部包含了 observable 内部的数据
 	 */
 	@Override
 	void onSubscribe(Subscription s);

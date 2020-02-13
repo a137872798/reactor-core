@@ -39,6 +39,8 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the input and accumulated value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该方法与 reduce 类似  不过reduce 是 将各个元素通过累加器计算得到结果后下发
+ * 而 scan
  */
 final class FluxScan<T> extends InternalFluxOperator<T, T> {
 
@@ -54,6 +56,10 @@ final class FluxScan<T> extends InternalFluxOperator<T, T> {
 		return new ScanSubscriber<>(actual, accumulator);
 	}
 
+	/**
+	 * 加工订阅者对象
+	 * @param <T>
+	 */
 	static final class ScanSubscriber<T>
 			implements InnerOperator<T, T> {
 
@@ -72,6 +78,10 @@ final class FluxScan<T> extends InternalFluxOperator<T, T> {
 			this.accumulator = accumulator;
 		}
 
+		/**
+		 * 该对象 订阅source 时触发
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
@@ -81,6 +91,10 @@ final class FluxScan<T> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 接收上游的数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {
@@ -100,6 +114,7 @@ final class FluxScan<T> extends InternalFluxOperator<T, T> {
 					return;
 				}
 			}
+			// 下发中间结果
 			value = t;
 			actual.onNext(t);
 		}
@@ -140,6 +155,10 @@ final class FluxScan<T> extends InternalFluxOperator<T, T> {
 			return actual;
 		}
 
+		/**
+		 * 下游对象请求拉取数据 会变成从source 拉取数据
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			s.request(n);

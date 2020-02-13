@@ -36,12 +36,19 @@ import reactor.util.context.Context;
  * @param <R> the container value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象用于收集上游发射的数据
  */
 final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 		implements Fuseable {
 
+	/**
+	 * 该函数用于生成容器
+	 */
 	final Supplier<R> supplier;
 
+	/**
+	 *
+	 */
 	final BiConsumer<? super R, ? super T> action;
 
 	MonoCollect(Flux<? extends T> source,
@@ -65,11 +72,20 @@ final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 			return null;
 		}
 
+		// 每个包装对象 内部包含一个新容器
 		return new CollectSubscriber<>(actual, action, container);
 	}
 
+	/**
+	 * 将订阅者包装成该对象
+	 * @param <T>
+	 * @param <R>
+	 */
 	static final class CollectSubscriber<T, R> extends Operators.MonoSubscriber<T, R>  {
 
+		/**
+		 * 该对象接收最上游的数据 以及容器对象
+		 */
 		final BiConsumer<? super R, ? super T> action;
 
 		Subscription s;
@@ -110,17 +126,28 @@ final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 			}
 		}
 
+		/**
+		 *
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
 
+				// 这一步会触发本对象的 request 方法 进而将 value 也就是 collect 容器 传播到下游
+				// 最终触发  actual.onNext(collect)   一开始 触发request时 是不会将数据传播到下游的
 				actual.onSubscribe(this);
 
+				// 向最上游拉取数据
 				s.request(Long.MAX_VALUE);
 			}
 		}
 
+		/**
+		 * 最上游传播数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {
@@ -129,6 +156,7 @@ final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 			}
 
 			try {
+				// 将数据填充到 collect 中
 				action.accept(value, t);
 			}
 			catch (Throwable e) {
@@ -157,6 +185,7 @@ final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 				return;
 			}
 			done = true;
+			// 接收完所有上游数据后 将value 传播到下游
 			complete(value);
 		}
 

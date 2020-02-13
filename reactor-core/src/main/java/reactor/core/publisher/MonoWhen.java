@@ -105,6 +105,9 @@ final class MonoWhen extends Mono<Void> implements SourceProducer<Void>  {
 		return null;
 	}
 
+	/**
+	 * 每个子对象 对应一个 mono 当 某个mono 接收到数据后 会回调该对象的方法 等到所有mono 都处理完数据后 向下游发射数据
+	 */
 	static final class WhenCoordinator extends Operators.MonoSubscriber<Object, Void> {
 
 		final WhenInner[] subscribers;
@@ -158,6 +161,7 @@ final class MonoWhen extends Mono<Void> implements SourceProducer<Void>  {
 
 		void signalError(Throwable t) {
 			if (delayError) {
+				// 允许延迟误差代表这里不立即触发 onError  而是在 signal 中收集更多的异常信息后 再下发
 				signal();
 			}
 			else {

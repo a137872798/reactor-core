@@ -27,6 +27,7 @@ import reactor.util.annotation.Nullable;
  * Take the very last value from a Publisher source and and emit that one.
  *
  * @param <T> the value type
+ *           只接收最后一个数据
  */
 final class MonoTakeLastOne<T> extends MonoFromFluxOperator<T, T>
 		implements Fuseable {
@@ -83,6 +84,7 @@ final class MonoTakeLastOne<T> extends MonoFromFluxOperator<T, T>
 			return super.scanUnsafe(key);
 		}
 
+		// 不断更换值 当触发 onComplete 时 才真正将结果下发
 		@Override
 		public void onNext(T t) {
 			T old = value;

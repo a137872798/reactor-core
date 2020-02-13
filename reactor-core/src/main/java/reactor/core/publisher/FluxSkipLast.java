@@ -47,6 +47,10 @@ final class FluxSkipLast<T> extends InternalFluxOperator<T, T> {
 	//Fixme Does not implement ConditionalSubscriber until the full chain of operators
 	// supports fully conditional, requesting N onSubscribe cost is offset
 
+	/**
+	 * 订阅者本身是一个队列  因为下发数据时 要跳过最后几个元素
+	 * @param <T>
+	 */
 	static final class SkipLastSubscriber<T>
 			extends ArrayDeque<T>
 			implements InnerOperator<T, T> {
@@ -74,9 +78,11 @@ final class FluxSkipLast<T> extends InternalFluxOperator<T, T> {
 
 		@Override
 		public void onNext(T t) {
+			// 当元素长度达到 size 时 之后发射的数据就是从头开始
 			if (size() == n) {
 				actual.onNext(pollFirst());
 			}
+			// 元素首先存放到队列中
 			offerLast(t);
 
 		}

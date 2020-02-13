@@ -118,6 +118,12 @@ final class FluxOnBackpressureLatest<T> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+
+		/**
+		 * 上游如果是 并发的 往下游发射数据 那么 drain() 只会获取到最新的  value
+		 * 比如同一时间有3个数据发射到下游 在drain() 中 只有一条线程能正常走流程 此时就会拉取最新的 value 期间value 更新过3次
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			Object toDiscard = VALUE.getAndSet(this, t);

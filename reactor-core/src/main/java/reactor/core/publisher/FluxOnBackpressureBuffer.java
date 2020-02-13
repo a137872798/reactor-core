@@ -33,10 +33,17 @@ import reactor.util.context.Context;
 
 /**
  * @author Stephane Maldini
+ * 这个背压 跟一般的那种 转发对象 有个queue 的有啥区别吗
  */
 final class FluxOnBackpressureBuffer<O> extends InternalFluxOperator<O, O> implements Fuseable {
 
+	/**
+	 * 超负荷时触发的函数
+	 */
 	final Consumer<? super O> onOverflow;
+	/**
+	 * 背压容器的 大小
+	 */
 	final int                 bufferSize;
 	final boolean             unbounded;
 
@@ -66,6 +73,10 @@ final class FluxOnBackpressureBuffer<O> extends InternalFluxOperator<O, O> imple
 		return Integer.MAX_VALUE;
 	}
 
+	/**
+	 * 加工后的订阅者
+	 * @param <T>
+	 */
 	static final class BackpressureBufferSubscriber<T>
 			implements QueueSubscription<T>, InnerOperator<T, T> {
 
@@ -94,6 +105,13 @@ final class FluxOnBackpressureBuffer<O> extends InternalFluxOperator<O, O> imple
 				AtomicLongFieldUpdater.newUpdater(BackpressureBufferSubscriber.class,
 						"requested");
 
+		/**
+		 * 初始化背压对象
+		 * @param actual
+		 * @param bufferSize
+		 * @param unbounded
+		 * @param onOverflow
+		 */
 		BackpressureBufferSubscriber(CoreSubscriber<? super T> actual,
 				int bufferSize,
 				boolean unbounded,
@@ -104,6 +122,7 @@ final class FluxOnBackpressureBuffer<O> extends InternalFluxOperator<O, O> imple
 
 			Queue<T> q;
 
+			// 获取链表或者 数组对象
 			if (unbounded) {
 				q = Queues.<T>unbounded(bufferSize).get();
 			}
@@ -112,6 +131,7 @@ final class FluxOnBackpressureBuffer<O> extends InternalFluxOperator<O, O> imple
 			}
 
 			if (!unbounded && Queues.capacity(q) > bufferSize) {
+				// 就是检验数据是否超负荷
 				this.capacityOrSkip = bufferSize;
 			}
 			else {
@@ -139,6 +159,10 @@ final class FluxOnBackpressureBuffer<O> extends InternalFluxOperator<O, O> imple
 			return InnerOperator.super.scanUnsafe(key);
 		}
 
+		/**
+		 * 设置上游数据
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
@@ -148,14 +172,20 @@ final class FluxOnBackpressureBuffer<O> extends InternalFluxOperator<O, O> imple
 			}
 		}
 
+		/**
+		 * 上游数据发送到背压对象
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {
 				Operators.onNextDropped(t, ctx);
 				return;
 			}
+			// 代表超负荷了
 			if ((capacityOrSkip != Integer.MAX_VALUE && queue.size() >= capacityOrSkip) || !queue.offer(t)) {
 				Throwable ex = Operators.onOperatorError(s, Exceptions.failWithOverflow(), t, ctx);
+				// 执行超负荷的钩子  也就是在正常的基础上增加了 背压异常时的对应措施
 				if (onOverflow != null) {
 					try {
 						onOverflow.accept(t);
@@ -169,6 +199,7 @@ final class FluxOnBackpressureBuffer<O> extends InternalFluxOperator<O, O> imple
 				onError(ex);
 				return;
 			}
+			// 将数据转发到下游
 			drain();
 		}
 

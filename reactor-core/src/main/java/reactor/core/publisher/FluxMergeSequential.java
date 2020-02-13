@@ -45,6 +45,9 @@ import reactor.util.context.Context;
  * @param <T> the source value type
  * @param <R> the output value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 按顺序将数据传播到下游
+ * 该对象跟 concatMap 的区别就是  该对象一旦收到上游的pub 后 直接触发订阅了  将上游的数据下发并存在队列中
+ * 然后按照生成pub 的顺序 依次消费   而concatMap 是先存储 pub 等到上一个pub的元素消费完了  才触发下一个 pub的订阅
  */
 final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 
@@ -110,6 +113,9 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 		/** request size for inner subscribers (size of the inner queues) */
 		final int prefetch;
 
+		/**
+		 * 代表 针对上游每个 T (会被转换成 pub)  的 subscriber
+		 */
 		final Queue<MergeSequentialInner<R>> subscribers;
 
 		/** whether or not errors should be delayed until the very end of all inner
@@ -181,11 +187,16 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 			return InnerOperator.super.scanUnsafe(key);
 		}
 
+		/**
+		 * 入口方法
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
 
+				// 触发 本对象的 request  主要是设置 requestd 这样 当上游有数据发过来时可以及时的传播到下游
 				actual.onSubscribe(this);
 
 				s.request(maxConcurrency == Integer.MAX_VALUE ? Long.MAX_VALUE :
@@ -193,6 +204,10 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 当上游往 本对象发送数据时  转发给子对象处理
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			Publisher<? extends R> publisher;
@@ -205,6 +220,7 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 				return;
 			}
 
+			// 将对象包装后设置到 队列中  (通过队列来确保是顺序传播)
 			MergeSequentialInner<R> inner = new MergeSequentialInner<>(this, prefetch);
 
 			if (cancelled) {
@@ -284,6 +300,10 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 主要是设置 requested
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
@@ -292,7 +312,13 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 代表上游 某个pub 对应的 subscribe 接收到了数据
+		 * @param inner
+		 * @param value
+		 */
 		void innerNext(MergeSequentialInner<R> inner, R value) {
+			// 插入到 该inner 对应的queue 中
 			if (inner.queue().offer(value)) {
 				drain();
 			}
@@ -316,17 +342,25 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 代表下游的某个 pub 已经发完了数据
+		 * @param inner
+		 */
 		void innerComplete(MergeSequentialInner<R> inner) {
 			inner.setDone();
 			drain();
 		}
 
+		/**
+		 * 上游的 数据先被转换成 pub 之后又将数据发送到下游的subscribe 时触发该方法
+		 */
 		void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
 				return;
 			}
 
 			int missed = 1;
+			// 记录当前正在处理的 pub 对象
 			MergeSequentialInner<R> inner = current;
 			Subscriber<? super R> a = actual;
 			ErrorMode em = errorMode;
@@ -335,6 +369,7 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 				long r = requested;
 				long e = 0L;
 
+				// 如果还没有设置 current 就从队列中拿出第一个
 				if (inner == null) {
 
 					if (em != ErrorMode.END) {
@@ -349,6 +384,7 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 
 					boolean outerDone = done;
 
+					// 根据顺序获取 最上游下发的 pub 对象
 					inner = subscribers.poll();
 
 					if (outerDone && inner == null) {
@@ -369,10 +405,12 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 
 				boolean continueNextSource = false;
 
+				// 获取 pub 对应的存储数据的队列
 				if (inner != null) {
 					Queue<R> q = inner.queue();
 					//noinspection ConstantConditions
 					if (q != null) {
+						// 不断拉取数据直到满足 requested
 						while (e != r) {
 							if (cancelled) {
 								cancelAll();
@@ -412,6 +450,7 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 
 							if (d && empty) {
 								inner = null;
+								// 这里清除掉 current 这样 下一轮会拉下一个 inner
 								current = null;
 								s.request(1);
 								continueNextSource = true;
@@ -482,6 +521,7 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 	 * hold items while they arrive out of order. The queue is drained as soon as correct
 	 * order can be restored.
 	 * @param <R> the type of objects emitted by the inner flux
+	 *           子对象
 	 */
 	static final class MergeSequentialInner<R> implements InnerConsumer<R>{
 
@@ -529,6 +569,10 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 			return null;
 		}
 
+		/**
+		 * 为该对象设置上游对象
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.setOnce(SUBSCRIPTION, this, s)) {
@@ -557,6 +601,10 @@ final class FluxMergeSequential<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 上游往本对象发送数据时
+		 * @param t
+		 */
 		@Override
 		public void onNext(R t) {
 			if (fusionMode == Fuseable.NONE) {

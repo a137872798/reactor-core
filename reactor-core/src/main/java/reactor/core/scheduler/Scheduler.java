@@ -33,6 +33,7 @@ import reactor.core.Exceptions;
  *
  * @author Stephane Maldini
  * @author Simon Baslé
+ * 响应式编程中的调度器对象 代表并行能力
  */
 public interface Scheduler extends Disposable {
 
@@ -47,6 +48,7 @@ public interface Scheduler extends Disposable {
 	 *
 	 * @return the {@link Disposable} instance that let's one cancel this particular task.
 	 * If the {@link Scheduler} has been shut down, throw a {@link RejectedExecutionException}.
+	 * 开启一个定时任务
 	 */
 	Disposable schedule(Runnable task);
 
@@ -62,6 +64,7 @@ public interface Scheduler extends Disposable {
 	 * @param unit the unit of measure of the delay amount
 	 * @return the {@link Disposable} that let's one cancel this particular delayed task,
 	 * or throw a {@link RejectedExecutionException} if the Scheduler is not capable of scheduling periodically.
+	 * 按照一定时间间隔来启动任务
 	 */
 	default Disposable schedule(Runnable task, long delay, TimeUnit unit) {
 		throw Exceptions.failWithRejectedNotTimeCapable();
@@ -84,6 +87,7 @@ public interface Scheduler extends Disposable {
 	 * @param unit the unit of measure of the delay amount
 	 * @return the {@link Disposable} that let's one cancel this particular delayed task,
 	 * or throw a {@link RejectedExecutionException} if the Scheduler is not capable of scheduling periodically.
+	 * 周期性指定任务
 	 */
 	default Disposable schedulePeriodically(Runnable task, long initialDelay, long period, TimeUnit unit) {
 		throw Exceptions.failWithRejectedNotTimeCapable();
@@ -93,6 +97,7 @@ public interface Scheduler extends Disposable {
 	 * Returns the "current time" notion of this scheduler.
 	 * @param unit the target unit of the current time
 	 * @return the current time value in the target unit of measure
+	 * 返回当前时间
 	 */
 	default long now(TimeUnit unit) {
 		return unit.convert(System.currentTimeMillis(), TimeUnit.MILLISECONDS);
@@ -109,6 +114,7 @@ public interface Scheduler extends Disposable {
 	 * underlying structure (like an {@link ExecutorService}).
 	 *
 	 * @return the Worker instance.
+	 * 通过调度器创建一个 worker 对象
 	 */
 	Worker createWorker();
 
@@ -142,6 +148,7 @@ public interface Scheduler extends Disposable {
 	 *
 	 * @author Stephane Maldini
 	 * @author Simon Baslé
+	 * 用于执行异步任务的 worker
 	 */
 	interface Worker extends Disposable {
 
@@ -150,6 +157,7 @@ public interface Scheduler extends Disposable {
 		 * @param task the task to schedule
 		 * @return the {@link Disposable} instance that let's one cancel this particular task.
 		 * If the Scheduler has been shut down, a {@link RejectedExecutionException} is thrown.
+		 * 立即执行 runnable
 		 */
 		Disposable schedule(Runnable task);
 

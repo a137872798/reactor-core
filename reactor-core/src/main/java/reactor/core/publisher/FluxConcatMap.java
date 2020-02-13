@@ -42,6 +42,7 @@ import static reactor.core.Exceptions.TERMINATED;
  * @param <R> the output value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 具备映射能力
  */
 final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 
@@ -69,6 +70,17 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 		END
 	}
 
+	/**
+	 * 传入的订阅者 根据条件加工
+	 * @param s
+	 * @param mapper
+	 * @param queueSupplier
+	 * @param prefetch
+	 * @param errorMode
+	 * @param <T>
+	 * @param <R>
+	 * @return
+	 */
 	static <T, R> CoreSubscriber<T> subscriber(CoreSubscriber<? super R> s,
 			Function<? super T, ? extends Publisher<? extends R>> mapper,
 			Supplier<? extends Queue<T>> queueSupplier,
@@ -87,9 +99,11 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 						prefetch,
 						true);
 			default:
+				// 默认情况
 				return new ConcatMapImmediate<>(s, mapper, queueSupplier, prefetch);
 		}
 	}
+
 
 	FluxConcatMap(Flux<? extends T> source,
 			Function<? super T, ? extends Publisher<? extends R>> mapper,
@@ -111,6 +125,11 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 		return prefetch;
 	}
 
+	/**
+	 * 加工订阅者对象
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super R> actual) {
 		if (FluxFlatMap.trySubscribeScalarMap(source, actual, mapper, false, true)) {
@@ -120,6 +139,11 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 		return subscriber(actual, mapper, queueSupplier, prefetch, errorMode);
 	}
 
+	/**
+	 * 该对象会将上游的每个数据看作一个新的 pub
+	 * @param <T>
+	 * @param <R>
+	 */
 	static final class ConcatMapImmediate<T, R>
 			implements FluxConcatMapSupport<T, R> {
 
@@ -176,6 +200,7 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 			this.queueSupplier = queueSupplier;
 			this.prefetch = prefetch;
 			this.limit = Operators.unboundedOrLimit(prefetch);
+			// 该对象在初始化时 inner 就创建完毕
 			this.inner = new ConcatMapInner<>(this);
 		}
 
@@ -192,6 +217,10 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 			return FluxConcatMapSupport.super.scanUnsafe(key);
 		}
 
+		/**
+		 * 该对象会与上游数据 组装成 subscription 并触发该方法
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
@@ -223,23 +252,30 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 					queue = queueSupplier.get();
 				}
 
+				// 触发 request
 				actual.onSubscribe(this);
 
 				s.request(Operators.unboundedOrPrefetch(prefetch));
 			}
 		}
 
+		/**
+		 * 代表上游的数据传播到该对象
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (sourceMode == Fuseable.ASYNC) {
 				drain();
 			}
+			// 上游的数据会挨个存入队列中
 			else if (!queue.offer(t)) {
 				onError(Operators.onOperatorError(s, Exceptions.failWithOverflow(Exceptions.BACKPRESSURE_ERROR_QUEUE_FULL), t,
 						this.ctx));
 				Operators.onDiscard(t, this.ctx);
 			}
 			else {
+				// 当数据成功存入 队列后会触发该方法
 				drain();
 			}
 		}
@@ -262,12 +298,19 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 当上游的 pub 全部发送完毕时触发该方法
+		 */
 		@Override
 		public void onComplete() {
 			done = true;
 			drain();
 		}
 
+		/**
+		 * 代表子对象接收到了 pub 下发的数据  这里只是做简单的转发
+		 * @param value
+		 */
 		@Override
 		public void innerNext(R value) {
 			if (guard == 0 && GUARD.compareAndSet(this, 0, 1)) {
@@ -282,6 +325,9 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 代表某个pub 的数据发送完了
+		 */
 		@Override
 		public void innerComplete() {
 			active = false;
@@ -333,6 +379,9 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 尝试拉取数据
+		 */
 		void drain() {
 			if (WIP.getAndIncrement(this) == 0) {
 				for (; ; ) {
@@ -340,12 +389,14 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 						return;
 					}
 
+					// 如果当前某个pub 正在活跃状态 就不需要查看下一个 pub
 					if (!active) {
 						boolean d = done;
 
 						T v;
 
 						try {
+							// 从队列中弹出元素 该元素就是 最上游的数据
 							v = queue.poll();
 						}
 						catch (Throwable e) {
@@ -364,6 +415,7 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 							Publisher<? extends R> p;
 
 							try {
+								// 将上游元素恢复成 pub
 								p = Objects.requireNonNull(mapper.apply(v),
 								"The mapper returned a null Publisher");
 							}
@@ -438,6 +490,7 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 							}
 							else {
 								active = true;
+								// 这样就是按照接收到上游的pub顺序 来生成下游数据 必须当前pub的数据发送完了才能发射下一个 pub数据
 								p.subscribe(inner);
 							}
 						}
@@ -819,6 +872,10 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 		void innerError(Throwable e);
 	}
 
+	/**
+	 * 作为转发器
+	 * @param <R>
+	 */
 	static final class ConcatMapInner<R>
 			extends Operators.MultiSubscriptionSubscriber<R, R> {
 
@@ -844,6 +901,10 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 			return super.scanUnsafe(key);
 		}
 
+		/**
+		 * 在 parent 对象中 每个接收到的上游对象被看作 pub 然后该方法是接收 pub发送的每个数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(R t) {
 			produced++;
@@ -863,6 +924,9 @@ final class FluxConcatMap<T, R> extends InternalFluxOperator<T, R> {
 			parent.innerError(t);
 		}
 
+		/**
+		 * 代表某个 pub 的数据全部发送完了
+		 */
 		@Override
 		public void onComplete() {
 			long p = produced;

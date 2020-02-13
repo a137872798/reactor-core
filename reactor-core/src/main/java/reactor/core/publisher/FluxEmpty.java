@@ -26,6 +26,7 @@ import reactor.util.annotation.Nullable;
  * This Publisher is effectively stateless and only a single instance exists.
  * Use the {@link #instance()} method to obtain a properly type-parametrized view of it.
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 代表内部不包含任何数据源
  */
 final class FluxEmpty extends Flux<Object>
 		implements Fuseable.ScalarCallable<Object>, SourceProducer<Object> {
@@ -36,6 +37,10 @@ final class FluxEmpty extends Flux<Object>
 		// deliberately no op
 	}
 
+	/**
+	 * 设置订阅者
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super Object> actual) {
 		Operators.complete(actual);

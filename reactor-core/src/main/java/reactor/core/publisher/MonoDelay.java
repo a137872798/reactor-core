@@ -33,6 +33,7 @@ import reactor.util.annotation.Nullable;
  * a ScheduledExecutorService instance or a generic function callback that
  * wraps other form of async-delayed execution of tasks.
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 在一定的延时后发射数据
  */
 final class MonoDelay extends Mono<Long> implements Scannable,  SourceProducer<Long>  {
 
@@ -48,6 +49,9 @@ final class MonoDelay extends Mono<Long> implements Scannable,  SourceProducer<L
 		this.timedScheduler = Objects.requireNonNull(timedScheduler, "timedScheduler");
 	}
 
+	/**
+	 * 设置订阅者
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super Long> actual) {
 		MonoDelayRunnable r = new MonoDelayRunnable(actual);
@@ -55,6 +59,7 @@ final class MonoDelay extends Mono<Long> implements Scannable,  SourceProducer<L
 		actual.onSubscribe(r);
 
 		try {
+			// 设置关闭任务
 			r.setCancel(timedScheduler.schedule(r, delay, unit));
 		}
 		catch (RejectedExecutionException ree) {
@@ -72,6 +77,9 @@ final class MonoDelay extends Mono<Long> implements Scannable,  SourceProducer<L
 		return null;
 	}
 
+	/**
+	 *
+	 */
 	static final class MonoDelayRunnable implements Runnable, InnerProducer<Long> {
 		final CoreSubscriber<? super Long> actual;
 
@@ -109,6 +117,9 @@ final class MonoDelay extends Mono<Long> implements Scannable,  SourceProducer<L
 			return InnerProducer.super.scanUnsafe(key);
 		}
 
+		/**
+		 * 在一定延时后会执行该任务
+		 */
 		@Override
 		public void run() {
 			if (requested) {
@@ -122,6 +133,7 @@ final class MonoDelay extends Mono<Long> implements Scannable,  SourceProducer<L
 					actual.onError(Operators.onOperatorError(t, actual.currentContext()));
 				}
 			} else {
+				// 如果下游还有没请求过数据 就抛出异常
 				actual.onError(Exceptions.failWithOverflow("Could not emit value due to lack of requests"));
 			}
 		}
@@ -137,6 +149,10 @@ final class MonoDelay extends Mono<Long> implements Scannable,  SourceProducer<L
 			}
 		}
 
+		/**
+		 * 代表下游已经申请过数据
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {

@@ -34,9 +34,13 @@ import reactor.util.annotation.Nullable;
  * @param <R> the result value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 映射对象 将 T 类型的Flux 转换成 R 类型的 Flux
  */
 final class FluxMapFuseable<T, R> extends InternalFluxOperator<T, R> implements Fuseable {
 
+	/**
+	 * 映射函数
+	 */
 	final Function<? super T, ? extends R> mapper;
 
 	/**
@@ -53,6 +57,11 @@ final class FluxMapFuseable<T, R> extends InternalFluxOperator<T, R> implements 
 		this.mapper = Objects.requireNonNull(mapper, "mapper");
 	}
 
+	/**
+	 * 加工订阅者对象   这里将 R 类型 转换回  T 类型
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	@SuppressWarnings("unchecked")
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super R> actual) {
@@ -219,15 +228,32 @@ final class FluxMapFuseable<T, R> extends InternalFluxOperator<T, R> implements 
 		}
 	}
 
+	/**
+	 * 订阅器 组合映射功能   就是代理模式
+	 * @param <T>
+	 * @param <R>
+	 */
 	static final class MapFuseableConditionalSubscriber<T, R>
 			implements ConditionalSubscriber<T>, InnerOperator<T, R>,
 			           QueueSubscription<R> {
 
+		/**
+		 * 订阅者
+		 */
 		final ConditionalSubscriber<? super R> actual;
+		/**
+		 * 映射函数
+		 */
 		final Function<? super T, ? extends R> mapper;
 
+		/**
+		 * 是否已经处理完内部元素
+		 */
 		boolean done;
 
+		/**
+		 * 该订阅者会从 subscription 对象中拉取数据
+		 */
 		QueueSubscription<T> s;
 
 		int sourceMode;
@@ -250,18 +276,25 @@ final class FluxMapFuseable<T, R> extends InternalFluxOperator<T, R> implements 
 		@SuppressWarnings("unchecked")
 		@Override
 		public void onSubscribe(Subscription s) {
+			// 代表 初次设置 subscription 成功
 			if (Operators.validate(this.s, s)) {
 				this.s = (QueueSubscription<T>) s;
 				actual.onSubscribe(this);
 			}
 		}
 
+		/**
+		 * 从上游过来的元素 会通过映射函数做处理
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
+			// 如果数据源是异步的 通过null来触发 onNext   TODO 注意异步是怎么处理的
 			if (sourceMode == ASYNC) {
 				actual.onNext(null);
 			}
 			else {
+				// done 代表 cancel 或者 处理完所有元素 这里应该是代表cancel
 				if (done) {
 					Operators.onNextDropped(t, actual.currentContext());
 					return;
@@ -270,6 +303,7 @@ final class FluxMapFuseable<T, R> extends InternalFluxOperator<T, R> implements 
 				R v;
 
 				try {
+					// 使用映射函数 转换
 					v = Objects.requireNonNull(mapper.apply(t),
 							"The mapper returned a null value.");
 				}
@@ -284,10 +318,16 @@ final class FluxMapFuseable<T, R> extends InternalFluxOperator<T, R> implements 
 					return;
 				}
 
+				// 使用转换后的元素 触发  onNext
 				actual.onNext(v);
 			}
 		}
 
+		/**
+		 * 判断是否满足触发 onNext 的条件
+		 * @param t the value to consume, not null
+		 * @return
+		 */
 		@Override
 		public boolean tryOnNext(T t) {
 			if (done) {
@@ -343,6 +383,7 @@ final class FluxMapFuseable<T, R> extends InternalFluxOperator<T, R> implements 
 
 		@Override
 		public void request(long n) {
+			// 实际上是委托 给 s内部的 subscription.request
 			s.request(n);
 		}
 
@@ -384,6 +425,11 @@ final class FluxMapFuseable<T, R> extends InternalFluxOperator<T, R> implements 
 			s.clear();
 		}
 
+		/**
+		 * 获取支持的聚合模式
+		 * @param requestedMode the mode requested by the intermediate operator
+		 * @return
+		 */
 		@Override
 		public int requestFusion(int requestedMode) {
 			int m;

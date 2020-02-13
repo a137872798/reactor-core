@@ -33,6 +33,7 @@ import reactor.util.context.Context;
  * Publisher sequence.
  *
  * @param <T> the value type
+ *           将上游并行结果 结合成一个数据 并下发
  */
 final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseable {
 
@@ -54,18 +55,31 @@ final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseabl
 		return null;
 	}
 
+	/**
+	 * 针对 mono 拉取数据
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		MergeReduceMain<T> parent =
 				new MergeReduceMain<>(actual, source.parallelism(), reducer);
+		// 这里会打上一个 触发过request 的标记 但是数据不是通过该对象拉取的
 		actual.onSubscribe(parent);
 
+		// 将数据发到子对象上
 		source.subscribe(parent.subscribers);
 	}
 
+	/**
+	 * 转发对象
+	 * @param <T>
+	 */
 	static final class MergeReduceMain<T>
 			extends Operators.MonoSubscriber<T, T> {
 
+		/**
+		 * 模拟的订阅者 用于从parallelFlux 拉取数据
+		 */
 		final MergeReduceInner<T>[] subscribers;
 
 		final BiFunction<T, T, T> reducer;
@@ -93,6 +107,12 @@ final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseabl
 				Throwable.class,
 				"error");
 
+		/**
+		 * 根据上游并行度创建对应长度数组
+		 * @param subscriber
+		 * @param n
+		 * @param reducer
+		 */
 		MergeReduceMain(CoreSubscriber<? super T> subscriber,
 				int n,
 				BiFunction<T, T, T> reducer) {
@@ -116,30 +136,41 @@ final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseabl
 			return super.scanUnsafe(key);
 		}
 
+		/**
+		 * 代表某一分流的累加结果已经完成
+		 * @param value
+		 * @return
+		 */
 		@Nullable
 		SlotPair<T> addValue(T value) {
 			for (; ; ) {
 				SlotPair<T> curr = current;
 
 				if (curr == null) {
+					// 设置当前 pair
 					curr = new SlotPair<>();
 					if (!CURRENT.compareAndSet(this, null, curr)) {
 						continue;
 					}
 				}
 
+				// 增加 acquire 的值
 				int c = curr.tryAcquireSlot();
+				// 代表超出负荷了  tryAcquireSlot()该方法只能执行2次
 				if (c < 0) {
 					CURRENT.compareAndSet(this, curr, null);
 					continue;
 				}
+				// 代表第一次设置
 				if (c == 0) {
 					curr.first = value;
 				}
 				else {
+					// 代表第二次设置
 					curr.second = value;
 				}
 
+				// 代表填充2个值后 会返回该对象
 				if (curr.releaseSlot()) {
 					CURRENT.compareAndSet(this, curr, null);
 					return curr;
@@ -166,9 +197,14 @@ final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseabl
 			}
 		}
 
+		/**
+		 * 接收上游分流的数据结果
+		 * @param value
+		 */
 		void innerComplete(@Nullable T value) {
 			if (value != null) {
 				for (; ; ) {
+					// 设置current 为一个slot 对象 内部可以存放2个结果
 					SlotPair<T> sp = addValue(value);
 
 					if (sp != null) {
@@ -184,11 +220,13 @@ final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseabl
 						}
 					}
 					else {
+						// 代表内部还是只有一个值 就不需要累加了 直接忽略
 						break;
 					}
 				}
 			}
 
+			// 代表数据被处理完了
 			if (REMAINING.decrementAndGet(this) == 0) {
 				SlotPair<T> sp = current;
 				CURRENT.lazySet(this, null);
@@ -203,6 +241,10 @@ final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseabl
 		}
 	}
 
+	/**
+	 * 用于接收上游分流后的数据
+	 * @param <T>
+	 */
 	static final class MergeReduceInner<T> implements InnerConsumer<T> {
 
 		final MergeReduceMain<T> parent;
@@ -221,6 +263,11 @@ final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseabl
 
 		boolean done;
 
+		/**
+		 * 子对象 负责接收上游分流后的数据
+		 * @param parent
+		 * @param reducer
+		 */
 		MergeReduceInner(MergeReduceMain<T> parent,
 				BiFunction<T, T, T> reducer) {
 			this.parent = parent;
@@ -252,6 +299,10 @@ final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseabl
 			}
 		}
 
+		/**
+		 * 接收上游发送的数据  这里不断通过 reducer 累加数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {
@@ -287,12 +338,16 @@ final class ParallelMergeReduce<T> extends Mono<T> implements Scannable, Fuseabl
 			parent.innerError(t);
 		}
 
+		/**
+		 * 代表某一分流处理完数据了
+		 */
 		@Override
 		public void onComplete() {
 			if (done) {
 				return;
 			}
 			done = true;
+			// 将结果发送到 main
 			parent.innerComplete(value);
 		}
 

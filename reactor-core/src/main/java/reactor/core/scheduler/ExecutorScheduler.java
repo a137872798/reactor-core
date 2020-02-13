@@ -38,9 +38,13 @@ import reactor.util.annotation.Nullable;
  * with delay / periodically).
  *
  * @author Stephane Maldini
+ * 内部包含一个普通的线程池
  */
 final class ExecutorScheduler implements Scheduler, Scannable {
 
+	/**
+	 * 内部维护一个线程池对象
+	 */
 	final Executor executor;
 	final boolean  trampoline;
 
@@ -51,12 +55,19 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 		this.trampoline = trampoline;
 	}
 
+	/**
+	 * 使用该对象执行任务
+	 * @param task the task to execute
+	 *
+	 * @return
+	 */
 	@Override
 	public Disposable schedule(Runnable task) {
 		if(terminated){
 			throw Exceptions.failWithRejected();
 		}
 		Objects.requireNonNull(task, "task");
+		// 将任务包装后提交  该任务就具备了被关闭的功能
 		ExecutorPlainRunnable r = new ExecutorPlainRunnable(task);
 		//RejectedExecutionException are propagated up, but since Executor doesn't from
 		//failing tasks we'll also wrap the execute call in a try catch:
@@ -83,6 +94,10 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 		return terminated;
 	}
 
+	/**
+	 * 根据是否开启蹦床模式 返回不同的worker
+	 * @return
+	 */
 	@Override
 	public Worker createWorker() {
 		return trampoline ? new ExecutorSchedulerTrampolineWorker(executor) :
@@ -127,6 +142,7 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 
 		@Override
 		public void run() {
+			// get()  返回false 代表本对象已经被关闭
 				if (!get()) {
 					try {
 						task.run();
@@ -162,6 +178,7 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 	/**
 	 * A Runnable that wraps a task and has reference back to its parent worker to
 	 * remove itself once completed or cancelled
+	 * 该 runnable 对象被封装后 执行完毕时 会通知parent
 	 */
 	static final class ExecutorTrackedRunnable extends AtomicBoolean
 			implements Runnable, Disposable {
@@ -170,6 +187,9 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 		private static final long serialVersionUID = 3503344795919906192L;
 
 		final Runnable     task;
+		/**
+		 * worker
+		 */
 		final WorkerDelete parent;
 
 		final boolean callRemoveOnFinish;
@@ -217,9 +237,13 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 
 	/**
 	 * A non-trampolining worker that tracks tasks.
+	 * worker
 	 */
 	static final class ExecutorSchedulerWorker implements Scheduler.Worker, WorkerDelete, Scannable {
 
+		/**
+		 * 线程池
+		 */
 		final Executor executor;
 
 		final Disposable.Composite tasks;
@@ -229,10 +253,16 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 			this.tasks = Disposables.composite();
 		}
 
+		/**
+		 * 为 worker 提交任务时 就是使用的线程池执行任务
+		 * @param task the task to schedule
+		 * @return
+		 */
 		@Override
 		public Disposable schedule(Runnable task) {
 			Objects.requireNonNull(task, "task");
 
+			// 当该任务执行完毕时 会通知本对象
 			ExecutorTrackedRunnable r = new ExecutorTrackedRunnable(task, this, true);
 			if (!tasks.add(r)) {
 				throw Exceptions.failWithRejected();
@@ -260,6 +290,10 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 			return tasks.isDisposed();
 		}
 
+		/**
+		 * 使用该worker 提交的任务会存放在一个队列中  当任务执行完毕后 会从队列中移除该任务
+		 * @param r
+		 */
 		@Override
 		public void delete(ExecutorTrackedRunnable r) {
 			tasks.remove(r);
@@ -302,6 +336,11 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 			this.queue = new ConcurrentLinkedQueue<>();
 		}
 
+		/**
+		 * 使用蹦床线程池执行任务
+		 * @param task the task to schedule
+		 * @return
+		 */
 		@Override
 		public Disposable schedule(Runnable task) {
 			Objects.requireNonNull(task, "task");
@@ -314,9 +353,12 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 				if (terminated) {
 					throw Exceptions.failWithRejected();
 				}
+				// 这里将任务排队后执行
 				queue.offer(r);
 			}
 
+			// 使用单条线程来处理内部所有的任务  当某个任务在执行中时 其他线程会将任务存储在队列中 之后再专门由某条线程来执行任务
+			// 这样就减少了线程池内线程的切换 提高了cpu利用率
 			if (WIP.getAndIncrement(this) == 0) {
 				try {
 					executor.execute(this);
@@ -360,6 +402,9 @@ final class ExecutorScheduler implements Scheduler, Scannable {
 			}
 		}
 
+		/**
+		 * 将任务排队后执行
+		 */
 		@Override
 		public void run() {
 			final Queue<ExecutorTrackedRunnable> q = queue;

@@ -25,8 +25,14 @@ import reactor.core.Disposable;
 import reactor.core.Disposables;
 import reactor.util.annotation.Nullable;
 
+/**
+ * 提交给调度器的任务会被封装成该对象
+ */
 final class SchedulerTask implements Runnable, Disposable, Callable<Void> {
 
+	/**
+	 * 内部执行的逻辑
+	 */
 	final Runnable task;
 
 	static final Future<Void> FINISHED = new FutureTask<>(() -> null);
@@ -34,6 +40,9 @@ final class SchedulerTask implements Runnable, Disposable, Callable<Void> {
 
 	static final Disposable TAKEN = Disposables.disposed();
 
+	/**
+	 * 结果会存放在该 future 对象中
+	 */
 	volatile Future<?> future;
 	static final AtomicReferenceFieldUpdater<SchedulerTask, Future> FUTURE =
 			AtomicReferenceFieldUpdater.newUpdater(SchedulerTask.class, Future.class, "future");

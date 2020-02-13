@@ -96,14 +96,18 @@ final class FluxGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R>
 						resultSelector,
 						processorQueueSupplier);
 
+		// 设置 requested
 		actual.onSubscribe(parent);
 
+		// 创建2个子对象 并追加到 parent的 关闭容器中
 		LeftRightSubscriber left = new LeftRightSubscriber(parent, true);
 		parent.cancellations.add(left);
 		LeftRightSubscriber right = new LeftRightSubscriber(parent, false);
 		parent.cancellations.add(right);
 
+		// 将source 发到左对象
 		source.subscribe(left);
+		// other 发到右对象
 		other.subscribe(right);
 		return null;
 	}
@@ -121,12 +125,23 @@ final class FluxGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R>
 		void innerCloseError(Throwable ex);
 	}
 
+	/**
+	 * 包装后的 子对象
+	 * @param <TLeft>
+	 * @param <TRight>
+	 * @param <TLeftEnd>
+	 * @param <TRightEnd>
+	 * @param <R>
+	 */
 	static final class GroupJoinSubscription<TLeft, TRight, TLeftEnd, TRightEnd, R>
 			implements JoinSupport<R> {
 
 		final Queue<Object>               queue;
 		final BiPredicate<Object, Object> queueBiOffer;
 
+		/**
+		 * 关联需要被关闭的对象
+		 */
 		final Disposable.Composite cancellations;
 
 		final Map<Integer, UnicastProcessor<TRight>> lefts;
@@ -186,6 +201,7 @@ final class FluxGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R>
 				BiFunction<? super TLeft, ? super Flux<TRight>, ? extends R> resultSelector,
 				Supplier<? extends Queue<TRight>> processorQueueSupplier) {
 			this.actual = actual;
+			// 获取静态对象  也就是 ListCompositeDisposable  该对象可以组合多个Disposable
 			this.cancellations = Disposables.composite();
 			this.processorQueueSupplier = processorQueueSupplier;
 			this.queue = Queues.unboundedMultiproducer().get();
@@ -477,11 +493,20 @@ final class FluxGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R>
 		}
 	}
 
+	/**
+	 * 每个join 包装后的订阅者 会有2个 子对象
+	 */
 	static final class LeftRightSubscriber
 			implements InnerConsumer<Object>, Disposable {
 
+		/**
+		 * 对应 join 包装后的订阅者
+		 */
 		final JoinSupport<?> parent;
 
+		/**
+		 * 该对象是否是左对象
+		 */
 		final boolean isLeft;
 
 		volatile Subscription subscription;
@@ -522,6 +547,10 @@ final class FluxGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R>
 			return Operators.cancelledSubscription() == subscription;
 		}
 
+		/**
+		 * 将上游数据与本对象绑起来  并拉取数据
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.setOnce(SUBSCRIPTION, this, s)) {
@@ -529,6 +558,10 @@ final class FluxGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R>
 			}
 		}
 
+		/**
+		 * 代表上游数据 通过该对象后又转到到父对象
+		 * @param t
+		 */
 		@Override
 		public void onNext(Object t) {
 			parent.innerValue(isLeft, t);
@@ -546,6 +579,9 @@ final class FluxGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R>
 
 	}
 
+	/**
+	 * 当 左右subscriber 接收到数据后 又会将每个元素转换成 pub
+	 */
 	static final class LeftRightEndSubscriber
 			implements InnerConsumer<Object>, Disposable {
 
@@ -553,6 +589,9 @@ final class FluxGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R>
 
 		final boolean isLeft;
 
+		/**
+		 * 本元素的下标
+		 */
 		final int index;
 
 		volatile Subscription subscription;
@@ -595,6 +634,10 @@ final class FluxGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R>
 			}
 		}
 
+		/**
+		 * 针对该数据源来说 每当下发一个数据 就是完成了一个小任务 所以可以触发 close
+		 * @param t
+		 */
 		@Override
 		public void onNext(Object t) {
 			if (Operators.terminate(SUBSCRIPTION, this)) {

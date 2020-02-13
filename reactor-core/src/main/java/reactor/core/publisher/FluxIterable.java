@@ -33,10 +33,17 @@ import reactor.util.function.Tuple2;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 使用迭代器作为数据源
  */
 final class FluxIterable<T> extends Flux<T> implements Fuseable, SourceProducer<T> {
 
+	/**
+	 * 数据源
+	 */
 	final Iterable<? extends T> iterable;
+	/**
+	 * 关闭时触发的动作 默认为null
+	 */
 	private final Runnable      onClose;
 
 	FluxIterable(Iterable<? extends T> iterable, Runnable onClose) {
@@ -48,6 +55,10 @@ final class FluxIterable<T> extends Flux<T> implements Fuseable, SourceProducer<
 		this(iterable, null);
 	}
 
+	/**
+	 * 为该对象设置订阅者
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		Iterator<? extends T> it;
@@ -131,6 +142,7 @@ final class FluxIterable<T> extends Flux<T> implements Fuseable, SourceProducer<
 			return;
 		}
 
+		// 生成 subscription 来处理 request请求
 		if (s instanceof ConditionalSubscriber) {
 			s.onSubscribe(new IterableSubscriptionConditional<>((ConditionalSubscriber<? super T>) s,
 					it, onClose));
@@ -412,6 +424,10 @@ final class FluxIterable<T> extends Flux<T> implements Fuseable, SourceProducer<
 		}
 	}
 
+	/**
+	 * 包装了数据源 和 subscriber
+	 * @param <T>
+	 */
 	static final class IterableSubscriptionConditional<T>
 			implements InnerProducer<T>, SynchronousSubscription<T> {
 
@@ -462,6 +478,10 @@ final class FluxIterable<T> extends Flux<T> implements Fuseable, SourceProducer<
 			this(actual, iterator, null);
 		}
 
+		/**
+		 * 下游申请数据时
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
@@ -556,6 +576,9 @@ final class FluxIterable<T> extends Flux<T> implements Fuseable, SourceProducer<
 			}
 		}
 
+		/**
+		 * 直接将所有数据发送到下游
+		 */
 		void fastPath() {
 			final Iterator<? extends T> a = iterator;
 			final ConditionalSubscriber<? super T> s = actual;

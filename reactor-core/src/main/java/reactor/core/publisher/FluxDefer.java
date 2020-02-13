@@ -28,15 +28,23 @@ import reactor.core.CoreSubscriber;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象内部没有直接存放数据流 而是通过一个可以创建数据流的 supplier 来初始化
  */
 final class FluxDefer<T> extends Flux<T> implements SourceProducer<T> {
 
+	/**
+	 * 用于创建数据流的 函数
+	 */
 	final Supplier<? extends Publisher<? extends T>> supplier;
 
 	FluxDefer(Supplier<? extends Publisher<? extends T>> supplier) {
 		this.supplier = Objects.requireNonNull(supplier, "supplier");
 	}
 
+	/**
+	 * 当为该对象设置订阅者时
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	@SuppressWarnings("unchecked")
 	public void subscribe(CoreSubscriber<? super T> actual) {
@@ -51,6 +59,7 @@ final class FluxDefer<T> extends Flux<T> implements SourceProducer<T> {
 			return;
 		}
 
+		// 将 pub 包装成 flux 对象
 		from(p).subscribe(actual);
 	}
 

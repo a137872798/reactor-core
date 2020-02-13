@@ -67,10 +67,15 @@ final class FluxSample<T, U> extends InternalFluxOperator<T, T> {
 
 		actual.onSubscribe(main);
 
+		// 创建一个 other 对象后 开始从上游拉取数据
 		other.subscribe(new SampleOther<>(main));
 		return main;
 	}
 
+	/**
+	 * 包装对象
+	 * @param <T>
+	 */
 	static final class SampleMainSubscriber<T> implements InnerOperator<T, T> {
 
 		final CoreSubscriber<? super T> actual;
@@ -157,6 +162,10 @@ final class FluxSample<T, U> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 设置上游对象
+		 * @param s
+		 */
 		void setOther(Subscription s) {
 			if (!OTHER.compareAndSet(this, null, s)) {
 				s.cancel();
@@ -165,9 +174,14 @@ final class FluxSample<T, U> extends InternalFluxOperator<T, T> {
 				}
 				return;
 			}
+			// 向上游拉取数据 会触发 other.onNext()
 			s.request(Long.MAX_VALUE);
 		}
 
+		/**
+		 * 下游订阅该对象 只是增加requested
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
@@ -181,6 +195,10 @@ final class FluxSample<T, U> extends InternalFluxOperator<T, T> {
 			cancelOther();
 		}
 
+		/**
+		 * 当该对象接收上游数据时修改内部的value
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			Object old = VALUE.getAndSet(this, t);
@@ -222,6 +240,11 @@ final class FluxSample<T, U> extends InternalFluxOperator<T, T> {
 		}
 	}
 
+	/**
+	 * main 对象会再被包装一层
+	 * @param <T>
+	 * @param <U>
+	 */
 	static final class SampleOther<T, U> implements InnerConsumer<U> {
 		final SampleMainSubscriber<T> main;
 
@@ -250,10 +273,15 @@ final class FluxSample<T, U> extends InternalFluxOperator<T, T> {
 			main.setOther(s);
 		}
 
+		/**
+		 * 接收上游数据  但是不做处理  只是查看main 是否刚好有数据 有的话就下发 也就是  sample的含义 只会返回部分数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(U t) {
 			SampleMainSubscriber<T> m = main;
 
+			// 获取当前value的值
 			T v = m.getAndNullValue();
 
 			if (v != null) {

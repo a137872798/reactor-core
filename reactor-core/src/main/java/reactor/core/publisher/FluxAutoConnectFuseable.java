@@ -31,6 +31,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 具备自动连接功能
  */
 final class FluxAutoConnectFuseable<T> extends Flux<T>
 		implements Scannable, Fuseable {

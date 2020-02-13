@@ -30,6 +30,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <I> delegate {@link Publisher} type
  * @param <O> produced type
+ *           该对象 将 一个 flux 操作适配成 mono
  */
 abstract class MonoFromFluxOperator<I, O> extends Mono<O> implements Scannable,
                                                                      OptimizableOperator<O, I> {

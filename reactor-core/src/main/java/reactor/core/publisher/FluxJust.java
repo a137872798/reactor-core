@@ -49,38 +49,71 @@ import reactor.util.annotation.Nullable;
  * </pre>
  *
  * @author Stephane Maldini
+ * 该flux 只包含一个对象
  */
 final class FluxJust<T> extends Flux<T>
 		implements Fuseable.ScalarCallable<T>, Fuseable,
 		           SourceProducer<T> {
 
+	/**
+	 * 内部数据源
+	 */
 	final T value;
 
 	FluxJust(T value) {
 		this.value = Objects.requireNonNull(value, "value");
 	}
 
+	/**
+	 * 调用 call 返回内部数据实体
+	 * @return
+	 * @throws Exception
+	 */
 	@Override
 	public T call() throws Exception {
 		return value;
 	}
 
+	/**
+	 * 当为该数据源追加订阅者时触发
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(final CoreSubscriber<? super T> actual) {
+		// 套路就是 将订阅者与数据源包装成一个 Subscription 之后触发 onSubscribe  这里面又会触发 subscription.request
 		actual.onSubscribe(new WeakScalarSubscription<>(value, actual));
 	}
 
+	/**
+	 * 继承自 Scannable 接口 通过某个Key 查询指标数据
+	 * @param key
+	 * @return
+	 */
 	@Override
 	public Object scanUnsafe(Attr key) {
+		// 返回背压队列的长度??? 默认为1
 		if (key == Attr.BUFFERED) return 1;
 		return null;
 	}
 
+	/**
+	 * 针对 Flux.just(T t).subscribe()  后 创建的 subscription 对象
+	 * @param <T>
+	 */
 	static final class WeakScalarSubscription<T> implements QueueSubscription<T>,
 	                                                        InnerProducer<T>{
 
+		/**
+		 * 代表已经订阅过数据了  设置该标识就代表该数据流只能处理一次
+		 */
 		boolean terminado;
+		/**
+		 * 数据源
+		 */
 		final T                     value;
+		/**
+		 * 能被包装的订阅者
+		 */
 		final CoreSubscriber<? super T> actual;
 
 		WeakScalarSubscription(@Nullable T value, CoreSubscriber<? super T> actual) {
@@ -88,12 +121,18 @@ final class FluxJust<T> extends Flux<T>
 			this.actual = actual;
 		}
 
+		/**
+		 * 订阅者 会触发 Subscription.request()  并开始拉取数据
+		 * @param elements
+		 */
 		@Override
 		public void request(long elements) {
 			if (terminado) {
 				return;
 			}
 
+			// 不是 volatile 修饰
+			// 修改为 true 代表已经消费过数据源
 			terminado = true;
 			if (value != null) {
 				actual.onNext(value);
@@ -101,11 +140,19 @@ final class FluxJust<T> extends Flux<T>
 			actual.onComplete();
 		}
 
+		/**
+		 * 关闭该对象就是直接设置标识 这样调用request 也不会触发 onNext
+		 */
 		@Override
 		public void cancel() {
 			terminado = true;
 		}
 
+		/**
+		 * 代表该对象仅支持 同步调用
+		 * @param requestedMode the mode requested by the intermediate operator
+		 * @return
+		 */
 		@Override
 		public int requestFusion(int requestedMode) {
 			if ((requestedMode & Fuseable.SYNC) != 0) {
@@ -114,6 +161,10 @@ final class FluxJust<T> extends Flux<T>
 			return 0;
 		}
 
+		/**
+		 * 用于结合 2个 flux 的数据时会调用该方法
+		 * @return
+		 */
 		@Override
 		@Nullable
 		public T poll() {

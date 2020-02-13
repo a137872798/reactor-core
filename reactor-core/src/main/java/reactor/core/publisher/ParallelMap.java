@@ -27,6 +27,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the input value type
  * @param <R> the output value type
+ *           接收上游结果 并作映射
  */
 final class ParallelMap<T, R> extends ParallelFlux<R> implements Scannable {
 

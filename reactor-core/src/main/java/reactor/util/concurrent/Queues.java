@@ -78,6 +78,7 @@ public final class Queues {
 	/**
 	 * An allocation friendly default of available slots in a given container, e.g. slow publishers and or fast/few
 	 * subscribers
+	 * 响应式背压容器容量
 	 */
 	public static final int XS_BUFFER_SIZE    = Math.max(8,
 			Integer.parseInt(System.getProperty("reactor.bufferSize.x", "32")));
@@ -105,6 +106,7 @@ public final class Queues {
 	 * @param batchSize the bounded or unbounded (int.max) queue size
 	 * @param <T> the reified {@link Queue} generic type
 	 * @return an unbounded or bounded {@link Queue} {@link Supplier}
+	 * 根据长度 创建队列的函数
 	 */
 	@SuppressWarnings("unchecked")
 	public static <T> Supplier<Queue<T>> get(int batchSize) {

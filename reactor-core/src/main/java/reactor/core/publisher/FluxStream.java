@@ -30,6 +30,7 @@ import reactor.core.Fuseable;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 使用一个 流对象作为数据源提供者
  */
 final class FluxStream<T> extends Flux<T> implements Fuseable, SourceProducer<T> {
 

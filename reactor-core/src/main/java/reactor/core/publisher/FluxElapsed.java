@@ -31,6 +31,9 @@ import reactor.util.function.Tuples;
  */
 final class FluxElapsed<T> extends InternalFluxOperator<T, Tuple2<Long, T>> implements Fuseable {
 
+	/**
+	 * 该对象 实际上就是 一个 JDK.scheduleExecutorService[]  可以添加定时任务 普通任务 以及获取当前时间
+	 */
 	final Scheduler scheduler;
 
 	FluxElapsed(Flux<T> source, Scheduler scheduler) {
@@ -50,6 +53,10 @@ final class FluxElapsed<T> extends InternalFluxOperator<T, Tuple2<Long, T>> impl
 		return super.scanUnsafe(key);
 	}
 
+	/**
+	 * 封装订阅者
+	 * @param <T>
+	 */
 	static final class ElapsedSubscriber<T>
 			implements InnerOperator<T, Tuple2<Long, T>>,
 			           QueueSubscription<Tuple2<Long, T>> {
@@ -97,6 +104,7 @@ final class FluxElapsed<T> extends InternalFluxOperator<T, Tuple2<Long, T>> impl
 				actual.onNext(null);
 				return;
 			}
+			// 将 T 加工成 携带距离上次onNext触发时间间隔的对象
 			actual.onNext(snapshot(t));
 		}
 

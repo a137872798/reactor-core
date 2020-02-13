@@ -83,6 +83,10 @@ final class FluxPeek<T> extends InternalFluxOperator<T, T> implements SignalPeek
 		return new PeekSubscriber<>(actual, this);
 	}
 
+	/**
+	 * 执行对应方法前 都先获取parent 的钩子 并执行
+	 * @param <T>
+	 */
 	static final class PeekSubscriber<T> implements InnerOperator<T, T> {
 
 		final CoreSubscriber<? super T> actual;

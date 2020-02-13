@@ -25,6 +25,7 @@ import reactor.core.CoreSubscriber;
  * Use the {@link #instance()} method to obtain a properly type-parametrized view of it.
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象不会往下游传播数据
  */
 final class FluxNever extends Flux<Object> implements SourceProducer<Object> {
 

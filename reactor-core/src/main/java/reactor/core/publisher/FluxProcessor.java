@@ -38,6 +38,7 @@ import reactor.util.context.Context;
  *
  * @param <IN> the input value type
  * @param <OUT> the output value type
+ *             适配了 reactor.Processor 接口  本对象将同时作为 pub 以及 sub
  */
 public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 		implements Processor<IN, OUT>, CoreSubscriber<IN>, Scannable, Disposable {
@@ -84,6 +85,7 @@ public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 	 * Return the number of active {@link Subscriber} or {@literal -1} if untracked.
 	 *
 	 * @return the number of active {@link Subscriber} or {@literal -1} if untracked
+	 * 记录当前订阅者数量
 	 */
 	public long downstreamCount(){
 		return inners().count();
@@ -93,6 +95,7 @@ public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 	 * Return the processor buffer capacity if any or {@link Integer#MAX_VALUE}
 	 *
 	 * @return processor buffer capacity if any or {@link Integer#MAX_VALUE}
+	 * 返回用于存储数据的容器
 	 */
 	public int getBufferSize() {
 		return Integer.MAX_VALUE;
@@ -102,6 +105,7 @@ public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 	 * Current error if any, default to null
 	 *
 	 * @return Current error if any, default to null
+	 * 返回当前产生的异常
 	 */
 	@Nullable
 	public Throwable getError() {
@@ -112,6 +116,7 @@ public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 	 * Return true if any {@link Subscriber} is actively subscribed
 	 *
 	 * @return true if any {@link Subscriber} is actively subscribed
+	 * 判断当前是否有下游对象
 	 */
 	public boolean hasDownstreams() {
 		return downstreamCount() != 0L;
@@ -121,6 +126,7 @@ public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 	 * Return true if terminated with onComplete
 	 *
 	 * @return true if terminated with onComplete
+	 * 判断本对象数据流是否发射完毕
 	 */
 	public final boolean hasCompleted() {
 		return isTerminated() && getError() == null;
@@ -135,6 +141,10 @@ public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 		return isTerminated() && getError() != null;
 	}
 
+	/**
+	 * 将内部订阅者 以stream的方式返回  因为 processor 是 pub 和 sub 的包装对象
+	 * @return
+	 */
 	@Override
 	public Stream<? extends Scannable> inners() {
 		return Stream.empty();
@@ -168,6 +178,10 @@ public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 		return null;
 	}
 
+	/**
+	 * 返回空的上下文对象
+	 * @return
+	 */
 	@Override
 	public Context currentContext() {
 		return Context.empty();
@@ -178,6 +192,7 @@ public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 	 * {@link Subscriber#onNext(Object)}.
 	 *
 	 * @return a serializing {@link FluxProcessor}
+	 * 确保在多线程中数据是串行下发的
 	 */
 	public final FluxProcessor<IN, OUT> serialize() {
 		return new DelegateProcessor<>(this, Operators.serialize(this));
@@ -198,6 +213,7 @@ public abstract class FluxProcessor<IN, OUT> extends Flux<OUT>
 	 * </ul>
 	 *
 	 * @return a serializing {@link FluxSink}
+	 * 从 pub sub 转换成 sink 来模拟下发数据的动作
 	 */
 	public final FluxSink<IN> sink() {
 		return sink(FluxSink.OverflowStrategy.IGNORE);

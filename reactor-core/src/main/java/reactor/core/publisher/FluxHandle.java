@@ -33,9 +33,13 @@ import reactor.util.context.Context;
  */
 final class FluxHandle<T, R> extends InternalFluxOperator<T, R> {
 
+	/**
+	 * sink 对象 会模拟 subscription 的动作 需要用户自行定义如何消费数据
+	 */
 	final BiConsumer<? super T, SynchronousSink<R>> handler;
 
 	FluxHandle(Flux<? extends T> source, BiConsumer<? super T, SynchronousSink<R>> handler) {
+		// 设置 数据源
 		super(source);
 		this.handler = Objects.requireNonNull(handler, "handler");
 	}
@@ -50,6 +54,11 @@ final class FluxHandle<T, R> extends InternalFluxOperator<T, R> {
 		return new HandleSubscriber<>(actual, handler);
 	}
 
+	/**
+	 * 包装订阅者
+	 * @param <T>
+	 * @param <R>
+	 */
 	static final class HandleSubscriber<T, R>
 			implements InnerOperator<T, R>,
 			           Fuseable.ConditionalSubscriber<T>,
@@ -85,6 +94,10 @@ final class FluxHandle<T, R> extends InternalFluxOperator<T, R> {
 			return actual.currentContext();
 		}
 
+		/**
+		 * 接收上游数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {
@@ -93,6 +106,7 @@ final class FluxHandle<T, R> extends InternalFluxOperator<T, R> {
 			}
 
 			try {
+				// 通过用户定义的模板处理数据
 				handler.accept(t, this);
 			}
 			catch (Throwable e) {
@@ -106,11 +120,17 @@ final class FluxHandle<T, R> extends InternalFluxOperator<T, R> {
 				}
 				return;
 			}
+			// data 是通过 next() 设置的
 			R v = data;
 			data = null;
+
+			// 这样看来 handle 面向用户主要可以拓展的地方就是 什么时机选择触发 complete 这样就可以中断上游数据的发送
+
+			// 正常触发了next 后 才会真正将数据发送到下游
 			if (v != null) {
 				actual.onNext(v);
 			}
+			// 代表触发了 complete()
 			if(stop){
 				if(error != null){
 					Throwable e_ = Operators.onNextError(t, error, actual.currentContext(), s);
@@ -206,6 +226,9 @@ final class FluxHandle<T, R> extends InternalFluxOperator<T, R> {
 			actual.onComplete();
 		}
 
+		/**
+		 * 标记已经处理完了
+		 */
 		@Override
 		public void complete() {
 			if (stop) {
@@ -223,6 +246,10 @@ final class FluxHandle<T, R> extends InternalFluxOperator<T, R> {
 			stop = true;
 		}
 
+		/**
+		 * next就是设置data
+		 * @param o
+		 */
 		@Override
 		public void next(R o) {
 			if(data != null){
@@ -249,6 +276,10 @@ final class FluxHandle<T, R> extends InternalFluxOperator<T, R> {
 			return actual;
 		}
 
+		/**
+		 * 请求上游发送数据
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			s.request(n);

@@ -31,6 +31,7 @@ import reactor.core.CoreSubscriber;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 重复订阅source
  */
 final class FluxRepeat<T> extends InternalFluxOperator<T, T> {
 

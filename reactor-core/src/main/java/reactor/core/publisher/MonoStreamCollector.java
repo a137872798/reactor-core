@@ -74,8 +74,14 @@ final class MonoStreamCollector<T, A, R> extends MonoFromFluxOperator<T, R>
 	static final class StreamCollectorSubscriber<T, A, R>
 			extends Operators.MonoSubscriber<T, R> {
 
+		/**
+		 * 该函数用于将 下发的数据与容器结合
+		 */
 		final BiConsumer<? super A, ? super T> accumulator;
 
+		/**
+		 * 该函数 将container 内的数据 转换成最终结果
+		 */
 		final Function<? super A, ? extends R> finisher;
 
 		A container; //not final to be able to null it out on termination

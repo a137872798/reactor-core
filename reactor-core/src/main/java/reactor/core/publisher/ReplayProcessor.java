@@ -45,6 +45,7 @@ import static reactor.core.publisher.FluxReplay.ReplaySubscriber.TERMINATED;
  * <p>
  *
  * @param <T> the value type
+ *           内部实现基本都是依赖 fluxReplay  该对象的特性就是 中转站的数据是存放在一个队列中的 而该队列是定期清除数据 还是怎么样可以定制
  */
 public final class ReplayProcessor<T> extends FluxProcessor<T, T>
 		implements Fuseable {

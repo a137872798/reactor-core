@@ -26,6 +26,7 @@ import reactor.util.annotation.Nullable;
 
 /**
  * A micro API for stream fusion, in particular marks producers that support a {@link QueueSubscription}.
+ * 聚合用的微型api
  */
 public interface Fuseable {
 
@@ -56,6 +57,7 @@ public interface Fuseable {
 	 * values.
 	 *
 	 * @param <T> the value type
+	 *           通过 tryOnNext 判断是否满足继续处理元素的条件
 	 */
 	interface ConditionalSubscriber<T> extends CoreSubscriber<T> {
 		/**
@@ -105,6 +107,7 @@ public interface Fuseable {
 		 *
 		 * @param requestedMode the mode requested by the intermediate operator
 		 * @return the actual fusion mode activated
+		 * 传入 尝试使用的聚合模式  并返回支持的聚合模式
 		 */
 		int requestFusion(int requestedMode);
 
@@ -187,14 +190,17 @@ public interface Fuseable {
 	 * overhead in many cases.
 	 *
 	 * @param <T> the content value type
+	 *           基于同步模式聚合
 	 */
 	interface SynchronousSubscription<T> extends QueueSubscription<T> {
 
 		@Override
 		default int requestFusion(int requestedMode) {
+			// 如果尝试请求的模式中包含同步模式 则返回同步模式 代表尝试获取的多个模式中 仅仅支持同步模式
 			if ((requestedMode & Fuseable.SYNC) != 0) {
 				return Fuseable.SYNC;
 			}
+			// 申请的是预期外的模式 则返回不支持
 			return NONE;
 		}
 

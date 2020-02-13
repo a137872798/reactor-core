@@ -35,6 +35,7 @@ import reactor.util.context.Context;
  * into a single regular Publisher sequence (exposed as reactor.core.publisher.Flux).
  *
  * @param <T> the value type
+ *           将并行数据以串行方式下发
  */
 final class ParallelMergeSequential<T> extends Flux<T> implements Scannable {
 	final ParallelFlux<? extends T> source;
@@ -71,9 +72,16 @@ final class ParallelMergeSequential<T> extends Flux<T> implements Scannable {
 		actual.onSubscribe(parent);
 		source.subscribe(parent.subscribers);
 	}
-	
+
+	/**
+	 * 转发对象
+	 * @param <T>
+	 */
 	static final class MergeSequentialMain<T> implements InnerProducer<T> {
 
+		/**
+		 * 内部包含的子对象 用于接收 parallelFlux 的数据
+		 */
 		final MergeSequentialInner<T>[] subscribers;
 		
 		final Supplier<Queue<T>>    queueSupplier;
@@ -139,6 +147,10 @@ final class ParallelMergeSequential<T> extends Flux<T> implements Scannable {
 			return Stream.of(subscribers);
 		}
 
+		/**
+		 * 最下游订阅者通过该对象拉取数据
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
@@ -171,9 +183,15 @@ final class ParallelMergeSequential<T> extends Flux<T> implements Scannable {
 				s.queue = null; 
 			}
 		}
-		
+
+		/**
+		 * 当某个子对象接收到数据时
+		 * @param inner
+		 * @param value
+		 */
 		void onNext(MergeSequentialInner<T> inner, T value) {
 			if (wip == 0 && WIP.compareAndSet(this, 0, 1)) {
+				// 这里可以直接将数据下发
 				if (requested != 0) {
 					actual.onNext(value);
 					if (requested != Long.MAX_VALUE) {
@@ -181,6 +199,7 @@ final class ParallelMergeSequential<T> extends Flux<T> implements Scannable {
 					}
 					inner.requestOne();
 				} else {
+					// 如果没有requested 就先存放在队列中
 					Queue<T> q = inner.getQueue(queueSupplier);
 
 					if(!q.offer(value)){
@@ -233,7 +252,10 @@ final class ParallelMergeSequential<T> extends Flux<T> implements Scannable {
 			
 			drainLoop();
 		}
-		
+
+		/**
+		 * 将数据传播到下游
+		 */
 		void drainLoop() {
 			int missed = 1;
 			
@@ -263,10 +285,12 @@ final class ParallelMergeSequential<T> extends Flux<T> implements Scannable {
 					boolean d = done == 0;
 					
 					boolean empty = true;
-					
+
+					// 遍历每个子对象
 					for (int i = 0; i < n; i++) {
 						MergeSequentialInner<T> inner = s[i];
-						
+
+						// 挨个 拉取数据 也就做到了 串行化
 						Queue<T> q = inner.queue;
 						if (q != null) {
 							T v = q.poll();

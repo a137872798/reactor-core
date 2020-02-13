@@ -26,6 +26,10 @@ package reactor.core.publisher;
  */
 final class BlockingMonoSubscriber<T> extends BlockingSingleSubscriber<T> {
 
+	/**
+	 * 唯一的区别就是 在 onNext 中没有触发 dispose()  因为Mono 内部只会设置一个元素 不需要再丢弃剩余元素了
+	 * @param t
+	 */
 	@Override
 	public void onNext(T t) {
 		if (value == null) {

@@ -34,6 +34,7 @@ import reactor.util.annotation.Nullable;
  *
  * @author Simon Baslé
  * @author Stephane Maldini
+ * 可丢弃对象静态工具类
  */
 public final class Disposables {
 
@@ -114,16 +115,25 @@ public final class Disposables {
 	/**
 	 * @author David Karnok
 	 * @author Simon Baslé
+	 * 代表一组可关闭对象
 	 */
 	static final class ListCompositeDisposable implements Disposable.Composite, Scannable {
 
+		/**
+		 * 内部包含的一组可关闭对象
+		 */
 		@Nullable
 		List<Disposable> resources;
 
+		/**
+		 * 该组对象是否被丢弃
+		 */
 		volatile boolean disposed;
 
 		ListCompositeDisposable() {
 		}
+
+		// 使用一组元素初始化该对象
 
 		ListCompositeDisposable(Disposable... resources) {
 			Objects.requireNonNull(resources, "resources is null");
@@ -143,8 +153,14 @@ public final class Disposables {
 			}
 		}
 
+		//
+
+		/**
+		 * 丢弃内部所有元素
+		 */
 		@Override
 		public void dispose() {
+			// 如果内部数据都已经被丢弃了 直接返回
 			if (disposed) {
 				return;
 			}
@@ -158,6 +174,7 @@ public final class Disposables {
 				resources = null;
 			}
 
+			// 触发内部所有元素的 dispose
 			dispose(set);
 		}
 
@@ -166,6 +183,11 @@ public final class Disposables {
 			return disposed;
 		}
 
+		/**
+		 * 增加一个新的可丢弃对象
+		 * @param d the {@link Disposable} to add.
+		 * @return
+		 */
 		@Override
 		public boolean add(Disposable d) {
 			Objects.requireNonNull(d, "d is null");
@@ -182,6 +204,7 @@ public final class Disposables {
 					}
 				}
 			}
+			// 否则直接触发 dispose
 			d.dispose();
 			return false;
 		}
@@ -211,6 +234,11 @@ public final class Disposables {
 			return false;
 		}
 
+		/**
+		 * 将某个可丢弃对象移除
+		 * @param d the {@link Disposable} to remove.
+		 * @return
+		 */
 		@Override
 		public boolean remove(Disposable d) {
 			Objects.requireNonNull(d, "Disposable item is null");
@@ -253,6 +281,10 @@ public final class Disposables {
 			dispose(set);
 		}
 
+		/**
+		 * 丢弃队列中所有元素
+		 * @param set
+		 */
 		void dispose(@Nullable List<Disposable> set) {
 			if (set == null) {
 				return;
@@ -269,6 +301,7 @@ public final class Disposables {
 					errors.add(ex);
 				}
 			}
+			// 组装异常信息
 			if (errors != null) {
 				if (errors.size() == 1) {
 					throw Exceptions.propagate(errors.get(0));

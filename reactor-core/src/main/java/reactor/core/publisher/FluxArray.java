@@ -30,6 +30,7 @@ import reactor.util.annotation.Nullable;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该flux 对象 内部包含一组数据
  */
 final class FluxArray<T> extends Flux<T> implements Fuseable, SourceProducer<T> {
 
@@ -67,6 +68,10 @@ final class FluxArray<T> extends Flux<T> implements Fuseable, SourceProducer<T> 
 		return null;
 	}
 
+	/**
+	 * 数据源为 数组
+	 * @param <T>
+	 */
 	static final class ArraySubscription<T>
 			implements InnerProducer<T>, SynchronousSubscription<T> {
 
@@ -88,6 +93,10 @@ final class FluxArray<T> extends Flux<T> implements Fuseable, SourceProducer<T> 
 			this.array = array;
 		}
 
+		/**
+		 * subscriber 通过调用request 从上游拉取数据
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
@@ -102,6 +111,7 @@ final class FluxArray<T> extends Flux<T> implements Fuseable, SourceProducer<T> 
 			}
 		}
 
+
 		void slowPath(long n) {
 			final T[] a = array;
 			final int len = a.length;
@@ -115,6 +125,7 @@ final class FluxArray<T> extends Flux<T> implements Fuseable, SourceProducer<T> 
 					return;
 				}
 
+				// 尝试将数组中的数据挨个往下传播
 				while (i != len && e != n) {
 					T t = a[i];
 
@@ -140,6 +151,7 @@ final class FluxArray<T> extends Flux<T> implements Fuseable, SourceProducer<T> 
 
 				n = requested;
 
+				// 更新当前数组消费的下标
 				if (n == e) {
 					index = i;
 					n = REQUESTED.addAndGet(this, -e);
@@ -151,6 +163,9 @@ final class FluxArray<T> extends Flux<T> implements Fuseable, SourceProducer<T> 
 			}
 		}
 
+		/**
+		 * 直接将数组中所有元素发送到下游
+		 */
 		void fastPath() {
 			final T[] a = array;
 			final int len = a.length;
@@ -181,6 +196,10 @@ final class FluxArray<T> extends Flux<T> implements Fuseable, SourceProducer<T> 
 			cancelled = true;
 		}
 
+		/**
+		 * 从该subscription 中直接拉取元素
+		 * @return
+		 */
 		@Override
 		@Nullable
 		public T poll() {

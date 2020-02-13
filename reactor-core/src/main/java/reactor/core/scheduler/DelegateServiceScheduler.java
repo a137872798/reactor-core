@@ -46,6 +46,9 @@ import reactor.util.annotation.Nullable;
 final class DelegateServiceScheduler implements Scheduler, Scannable {
 
 	final String executorName;
+	/**
+	 * 内部维护的线程池对象
+	 */
 	final ScheduledExecutorService executor;
 
 	DelegateServiceScheduler(String executorName, ExecutorService executorService) {
@@ -91,6 +94,11 @@ final class DelegateServiceScheduler implements Scheduler, Scannable {
 		executor.shutdownNow();
 	}
 
+	/**
+	 * 将普通线程池 适配成定时线程池
+	 * @param executor
+	 * @return
+	 */
 	@SuppressWarnings("unchecked")
 	static ScheduledExecutorService convert(ExecutorService executor) {
 		if (executor instanceof ScheduledExecutorService) {

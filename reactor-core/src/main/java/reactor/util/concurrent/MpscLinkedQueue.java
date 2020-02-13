@@ -31,17 +31,27 @@ import reactor.util.annotation.Nullable;
 /**
  * A multi-producer single consumer unbounded queue.
  * @param <E> the contained value type
+ *           多生产者 单消费者队列
  */
 final class MpscLinkedQueue<E> extends AbstractQueue<E> implements BiPredicate<E, E> {
+	/**
+	 * 代表当前尾节点
+	 */
 	private volatile LinkedQueueNode<E> producerNode;
 
 	private final static AtomicReferenceFieldUpdater<MpscLinkedQueue, LinkedQueueNode> PRODUCER_NODE_UPDATER
 			= AtomicReferenceFieldUpdater.newUpdater(MpscLinkedQueue.class, LinkedQueueNode.class, "producerNode");
 
+	/**
+	 * 当前首节点
+	 */
 	private volatile LinkedQueueNode<E> consumerNode;
 	private final static AtomicReferenceFieldUpdater<MpscLinkedQueue, LinkedQueueNode> CONSUMER_NODE_UPDATER
 			= AtomicReferenceFieldUpdater.newUpdater(MpscLinkedQueue.class, LinkedQueueNode.class, "consumerNode");
 
+	/**
+	 * 初始状态 首尾指向一个节点
+	 */
 	public MpscLinkedQueue() {
 		LinkedQueueNode<E> node = new LinkedQueueNode<>();
 		CONSUMER_NODE_UPDATER.lazySet(this, node);
@@ -64,6 +74,7 @@ final class MpscLinkedQueue<E> extends AbstractQueue<E> implements BiPredicate<E
 	 * producers can get the same producer node as part of XCHG guarantee.
 	 *
 	 * @see java.util.Queue#offer(java.lang.Object)
+	 * 设置一个新节点
 	 */
 	@Override
 	@SuppressWarnings("unchecked")
@@ -236,8 +247,15 @@ final class MpscLinkedQueue<E> extends AbstractQueue<E> implements BiPredicate<E
 		throw new UnsupportedOperationException();
 	}
 
+	/**
+	 * 该队列对象内的节点
+	 * @param <E>
+	 */
 	static final class LinkedQueueNode<E>
 	{
+		/**
+		 * 队列以单链表结构连接
+		 */
 		private volatile LinkedQueueNode<E> next;
 		private final static AtomicReferenceFieldUpdater<LinkedQueueNode, LinkedQueueNode> NEXT_UPDATER
 				= AtomicReferenceFieldUpdater.newUpdater(LinkedQueueNode.class, LinkedQueueNode.class, "next");

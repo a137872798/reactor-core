@@ -25,6 +25,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 忽略下发的元素 只注意 onComplete
  */
 final class MonoIgnoreElements<T> extends MonoFromFluxOperator<T, T> {
 

@@ -34,6 +34,7 @@ import reactor.util.context.Context;
  *     {@link MonoSink} based generators for these situations.
  *
  * @param <T> the output value type
+ *           同步下沉对象 配合一个 consumer 来模拟 flux 也就是用户在consumer的处理逻辑中 自行设置数据源并通过操纵sink 完整数据的传播
  */
 public interface SynchronousSink<T> {
 	/**

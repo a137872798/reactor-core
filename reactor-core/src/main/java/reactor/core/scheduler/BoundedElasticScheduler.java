@@ -56,18 +56,25 @@ import reactor.util.annotation.Nullable;
  * This scheduler is not restartable.
  *
  * @author Simon Baslé
+ * 弹性线程池
  */
 final class BoundedElasticScheduler
 		implements Scheduler, Supplier<ScheduledExecutorService>, Scannable {
 
 	static final AtomicLong COUNTER = new AtomicLong();
 
+	/**
+	 * 一个普通的线程工厂 没有做缓存之类的
+	 */
 	static final ThreadFactory EVICTOR_FACTORY = r -> {
 		Thread t = new Thread(r, "elasticBounded-evictor-" + COUNTER.incrementAndGet());
 		t.setDaemon(true);
 		return t;
 	};
 
+	/**
+	 * 该对象内部只有一个 关闭的线程池  应该是作为 某种标识
+	 */
 	static final CachedService SHUTDOWN            = new CachedService(null);
 	static final int           DEFAULT_TTL_SECONDS = 60;
 
@@ -75,13 +82,28 @@ final class BoundedElasticScheduler
 	final int                        ttlSeconds;
 	final int                        threadCap;
 	final int                        deferredTaskCap;
+	/**
+	 * 该对象内部维护的线程池 以及过期时间   每个cachedServiceExpiry 内有一个 parent 属性 对应到 BoundedElasticScheduler
+	 */
 	final Deque<CachedServiceExpiry> idleServicesWithExpiry;
+	/**
+	 * 如果当前没有线程池可分配 那么任务会被封装成延时对象 并存放在队列中
+	 */
 	final Queue<DeferredFacade>      deferredFacades;
+	/**
+	 * 该对象内部维护的所有线程池
+	 */
 	final Queue<CachedService>       allServices;
+	/**
+	 * 推测该对象是 用于清理该对象内部维护的线程池
+	 */
 	final ScheduledExecutorService   evictor;
 
 	volatile boolean shutdown;
 
+	/**
+	 * 可分配的线程池数量
+	 */
 	volatile int                                                    remainingThreads;
 	static final AtomicIntegerFieldUpdater<BoundedElasticScheduler> REMAINING_THREADS =
 			AtomicIntegerFieldUpdater.newUpdater(BoundedElasticScheduler.class, "remainingThreads");
@@ -91,6 +113,13 @@ final class BoundedElasticScheduler
 			AtomicIntegerFieldUpdater.newUpdater(BoundedElasticScheduler.class, "remainingDeferredTasks");
 
 
+	/**
+	 *
+	 * @param threadCap  线程数最大值
+	 * @param deferredTaskCap  延迟任务最大值
+	 * @param factory
+	 * @param ttlSeconds
+	 */
 	BoundedElasticScheduler(int threadCap, int deferredTaskCap, ThreadFactory factory, int ttlSeconds) {
 		if (ttlSeconds < 0) {
 			throw new IllegalArgumentException("ttlSeconds must be positive, was: " + ttlSeconds);
@@ -107,9 +136,11 @@ final class BoundedElasticScheduler
 		this.deferredTaskCap = deferredTaskCap;
 		this.remainingDeferredTasks = deferredTaskCap;
 		this.factory = factory;
+		// 这里初始化对应的并发队列 用于存放数据
 		this.idleServicesWithExpiry = new ConcurrentLinkedDeque<>();
 		this.deferredFacades = new ConcurrentLinkedQueue<>();
 		this.allServices = new ConcurrentLinkedQueue<>();
+		// 开启驱逐任务
 		this.evictor = Executors.newScheduledThreadPool(1, EVICTOR_FACTORY);
 		this.evictor.scheduleAtFixedRate(() -> this.eviction(System::currentTimeMillis),
 				ttlSeconds,
@@ -120,6 +151,7 @@ final class BoundedElasticScheduler
 	/**
 	 * Instantiates the default {@link ScheduledExecutorService} for the BoundedElasticScheduler
 	 * ({@code Executors.newScheduledThreadPoolExecutor} with core and max pool size of 1).
+	 * 这里直接创建一个线程池
 	 */
 	@Override
 	public ScheduledExecutorService get() {
@@ -146,15 +178,21 @@ final class BoundedElasticScheduler
 		}
 		shutdown = true;
 
+		// 关闭后台线程
 		evictor.shutdownNow();
 		idleServicesWithExpiry.clear();
 
 		CachedService cached;
 		while ((cached = allServices.poll()) != null) {
+			// 关闭所有缓存的线程池
 			cached.exec.shutdownNow();
 		}
 	}
 
+	/**
+	 * 尝试从该对象中拉取一个线程池
+	 * @return
+	 */
 	@Nullable
 	CachedService tryPick() {
 		if (shutdown) {
@@ -162,11 +200,13 @@ final class BoundedElasticScheduler
 		}
 		CachedService result;
 		//try to see if there is an idle worker
+		// 先尝试从缓存队列中拉取
 		CachedServiceExpiry e = idleServicesWithExpiry.pollLast();
 		if (e != null) {
 			return e.cached;
 		}
 
+		// 尝试分配一个线程池
 		if (REMAINING_THREADS.decrementAndGet(this) < 0) {
 			//cap reached
 			REMAINING_THREADS.incrementAndGet(this);
@@ -175,6 +215,7 @@ final class BoundedElasticScheduler
 			}
 			return null;
 		}
+		// 成功分配的情况
 		else {
 			result = new CachedService(this);
 			allServices.offer(result);
@@ -187,6 +228,10 @@ final class BoundedElasticScheduler
 	}
 
 
+	/**
+	 * 将某个线程池封装成 worker   即使本对象已经被关闭 会返回一个 Shutdown的 worker
+	 * @return
+	 */
 	@Override
 	public Worker createWorker() {
 		if (shutdown) {
@@ -204,6 +249,7 @@ final class BoundedElasticScheduler
 			if (shutdown) {
 				return new ActiveWorker(SHUTDOWN);
 			}
+			// 这里创建一个 延迟分配worker 的对象 推测是无法立即使用
 			DeferredWorker deferredWorker = new DeferredWorker(this);
 			this.deferredFacades.offer(deferredWorker);
 			return deferredWorker;
@@ -220,9 +266,17 @@ final class BoundedElasticScheduler
 		}
 	}
 
+	/**
+	 * 定时执行某个任务
+	 * @param task the task to execute
+	 *
+	 * @return
+	 */
 	@Override
 	public Disposable schedule(Runnable task) {
+		// 首先尝试获取一个 线程池
 		CachedService cached = tryPick();
+		// 使用定时器对象来处理任务
 		if (cached != null) {
 			return Schedulers.directSchedule(cached.exec,
 					task,
@@ -230,17 +284,21 @@ final class BoundedElasticScheduler
 					0L,
 					TimeUnit.MILLISECONDS);
 		}
+		// 如果此时没有分配到线程池  创建一个延迟任务
 		else if (deferredTaskCap == Integer.MAX_VALUE) {
 			DeferredDirect deferredDirect = new DeferredDirect(task, 0L, 0L, TimeUnit.MILLISECONDS, this);
 			deferredFacades.offer(deferredDirect);
 			return deferredDirect;
 		}
 		else {
+			// 代表 延迟执行队列的空间不是无限的
 			for (;;) {
 				int remTasks = REMAINING_DEFERRED_TASKS.get(this);
 				if (remTasks <= 0) {
+					// 如果没有空间 则抛出异常
 					throw Exceptions.failWithRejected("hard cap on deferred tasks reached for " + this.toString());
 				}
+				// 如果有队列还有空间 则创建任务
 				if (REMAINING_DEFERRED_TASKS.compareAndSet(this, remTasks, remTasks - 1)) {
 					DeferredDirect deferredDirect = new DeferredDirect(task, 0L, 0L, TimeUnit.MILLISECONDS, this);
 					deferredFacades.offer(deferredDirect);
@@ -250,6 +308,13 @@ final class BoundedElasticScheduler
 		}
 	}
 
+	/**
+	 * 在一定延时后执行某个任务
+	 * @param task the task to schedule
+	 * @param delay the delay amount, non-positive values indicate non-delayed scheduling
+	 * @param unit the unit of measure of the delay amount
+	 * @return
+	 */
 	@Override
 	public Disposable schedule(Runnable task, long delay, TimeUnit unit) {
 		CachedService cached = tryPick();
@@ -335,6 +400,10 @@ final class BoundedElasticScheduler
 		return null;
 	}
 
+	/**
+	 * 返回当前空闲的线程池
+	 * @return
+	 */
 	@Override
 		//TODO re-evaluate the inners? should these include deferredWorkers? allServices?
 	public Stream<? extends Scannable> inners() {
@@ -342,47 +411,69 @@ final class BoundedElasticScheduler
 		                             .map(cached -> cached.cached);
 	}
 
+	/**
+	 * 每个一定时间 就会进行驱逐任务 就是将过期的线程池关闭
+	 * @param nowSupplier
+	 */
 	void eviction(LongSupplier nowSupplier) {
 		long now = nowSupplier.getAsLong();
+		// 获取当前空闲的线程池对象
 		List<CachedServiceExpiry> list = new ArrayList<>(idleServicesWithExpiry);
 		for (CachedServiceExpiry e : list) {
+			// 代表已经过期了
 			if (e.expireMillis < now) {
 				if (idleServicesWithExpiry.remove(e)) {
+					// 关闭线程池
 					e.cached.exec.shutdownNow();
+					// 从可选队列中移除
 					allServices.remove(e.cached);
+					// 代表可分配的线程池数量又增加了
 					REMAINING_THREADS.incrementAndGet(this);
 				}
 			}
 		}
 	}
 
+	/**
+	 * 一个缓存对象
+	 */
 	static final class CachedService implements Disposable, Scannable {
 
 		final BoundedElasticScheduler  parent;
+		/**
+		 * 真正的线程池对象
+		 */
 		final ScheduledExecutorService exec;
 
 		CachedService(@Nullable BoundedElasticScheduler parent) {
 			this.parent = parent;
 			if (parent != null) {
+				// 使用装饰器包装 定时对象
 				this.exec = Schedulers.decorateExecutorService(parent, parent.get());
 			}
 			else {
+				// 该对象初始化时 需要的是一个已经停止的线程池  所以一生成线程池 马上调用了shutdownNow
 				this.exec = Executors.newSingleThreadScheduledExecutor();
 				this.exec.shutdownNow();
 			}
 		}
 
+		/**
+		 * 当该线程池被使用者释放时
+		 */
 		@Override
 		public void dispose() {
 			if (exec != null) {
 				if (this != SHUTDOWN && !parent.shutdown) {
 					//in case of work, re-create an ActiveWorker
+					// 判断是否有某个待执行的任务
 					DeferredFacade deferredFacade = parent.deferredFacades.poll();
 					if (deferredFacade != null) {
 						deferredFacade.setService(this);
 					}
 					else {
 						//if no more work, the service is put back at end of the cached queue and new expiry is started
+						// 将当前线程池 存放到父类的缓存队列中
 						CachedServiceExpiry e = new CachedServiceExpiry(this,
 								System.currentTimeMillis() + parent.ttlSeconds * 1000L);
 						parent.idleServicesWithExpiry.offerLast(e);
@@ -410,6 +501,9 @@ final class BoundedElasticScheduler
 		}
 	}
 
+	/**
+	 * 代表某个 缓存对象的以及过期时间
+	 */
 	static final class CachedServiceExpiry {
 
 		final CachedService cached;
@@ -421,8 +515,14 @@ final class BoundedElasticScheduler
 		}
 	}
 
+	/**
+	 * 当此时有可用的线程池时
+	 */
 	static final class ActiveWorker extends AtomicBoolean implements Worker, Scannable {
 
+		/**
+		 * 内部维护的线程池对象
+		 */
 		final CachedService cached;
 		final Composite tasks;
 
@@ -495,6 +595,8 @@ final class BoundedElasticScheduler
 	 * Capture a submitted task, then its deferred execution when an ActiveWorker becomes available.
 	 * Propagates task cancellation, as this would be the outer world {@link Disposable} interface
 	 * even when the task is activated.
+	 * 当此时没有线程池分配到时  会返回一个 deferredWorker  用户用该对象执行任务时 会保存在一个队列中  等待用户归还线程池时
+	 * 会重新 消费队列中的任务
 	 */
 	static final class DeferredWorkerTask implements Disposable {
 
@@ -517,7 +619,12 @@ final class BoundedElasticScheduler
 			this.timeUnit = unit;
 		}
 
+		/**
+		 * 激活该对象
+		 * @param delegate
+		 */
 		void activate(ActiveWorker delegate) {
+			// 执行内部任务
 			if (parent.parent.deferredTaskCap != Integer.MAX_VALUE) {
 				REMAINING_DEFERRED_TASKS.incrementAndGet(parent.parent);
 			}
@@ -552,6 +659,7 @@ final class BoundedElasticScheduler
 	/**
 	 * Represent a synthetic worker that doesn't actually submit tasks until a proper {@link ActiveWorker} has
 	 * become available. Propagates cancellation of tasks and disposal of worker in early scenarios.
+	 * 该worker 是一个队列 内部存放的是延时任务
 	 */
 	static final class DeferredWorker extends ConcurrentLinkedQueue<DeferredWorkerTask> implements Worker, Scannable,
 	                                                                                               DeferredFacade {
@@ -573,11 +681,16 @@ final class BoundedElasticScheduler
 			this.workerName = parent.toString() + ".deferredWorker";
 		}
 
+		/**
+		 * 当释放了某个线程池后 会从该对象中找到延时的任务 并执行
+		 * @param service
+		 */
 		public void setService(CachedService service) {
 			if (DISPOSED.get(this) == 1) {
 				service.dispose();
 				return;
 			}
+			// 使用该 activeWorker 执行任务
 			ActiveWorker delegate = new ActiveWorker(service);
 			if (DELEGATE.compareAndSet(this, null, delegate)) {
 				DeferredWorkerTask pendingTask;
@@ -719,6 +832,7 @@ final class BoundedElasticScheduler
 	 * Capture a task submitted directly to the {@link Scheduler}, then its deferred execution when a {@link CachedService} becomes available.
 	 * Propagates task cancellation, as this would be the outer world {@link Disposable} interface even when the task is activated.
 	 * Propagates cancellation of tasks in early scenarios.
+	 * 延时任务对象
 	 */
 	static final class DeferredDirect extends AtomicReference<CachedService> implements Scannable, Disposable,
 	                                                                                    DeferredFacade {
@@ -727,11 +841,16 @@ final class BoundedElasticScheduler
 		static final AtomicReferenceFieldUpdater<DeferredDirect, Disposable> ACTIVE_TASK =
 				AtomicReferenceFieldUpdater.newUpdater(DeferredDirect.class, Disposable.class, "activeTask");
 
+		/**
+		 * 本任务是否已经被关闭
+		 */
 		volatile int                                           disposed;
 		static final AtomicIntegerFieldUpdater<DeferredDirect> DISPOSED =
 				AtomicIntegerFieldUpdater.newUpdater(DeferredDirect.class, "disposed");
 
 		final Runnable                task;
+
+		// 执行任务 延迟相关信息
 		final long                    delay;
 		final long                    period;
 		final TimeUnit                timeUnit;
@@ -745,8 +864,13 @@ final class BoundedElasticScheduler
 			this.parent = parent;
 		}
 
+		/**
+		 * 代表某个线程池空闲下来  就可以分配给该定时对象  同时执行任务
+		 * @param service
+		 */
 		@Override
 		public void setService(CachedService service) {
+			// 如果本任务已经被关闭了
 			if (DISPOSED.get(this) == 1) {
 				service.dispose();
 				return;

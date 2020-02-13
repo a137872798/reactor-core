@@ -18,7 +18,7 @@ package reactor.core.publisher;
 
 
 /**
- * Reactive Stream signal types
+ * Reactive Stream signal types   代表在响应式编程中接收到的信号类型
  */
 public enum SignalType {
 
@@ -32,6 +32,7 @@ public enum SignalType {
 	REQUEST,
 	/**
 	 * A signal when the subscription is cancelled
+	 * 接收到一个关闭的信号
 	 */
 	CANCEL,
 	/**
@@ -44,6 +45,7 @@ public enum SignalType {
 	ON_NEXT,
 	/**
 	 * A signal when an operator receives an error
+	 * 代表接收到了异常信号
 	 */
 	ON_ERROR,
 	/**

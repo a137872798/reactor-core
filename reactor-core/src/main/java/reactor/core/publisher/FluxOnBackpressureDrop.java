@@ -30,6 +30,7 @@ import reactor.util.context.Context;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象 没有缓存上游发送的数据 也就是 下游还没有调用 request 时 上游就可以直接发送数据 并且 默认会被丢弃
  */
 final class FluxOnBackpressureDrop<T> extends InternalFluxOperator<T, T> {
 
@@ -98,6 +99,7 @@ final class FluxOnBackpressureDrop<T> extends InternalFluxOperator<T, T> {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
 
+				// 假设下游没有调用 request() 或者是延迟调用 那么 拉取到的上游数据就默认都会被丢弃
 				actual.onSubscribe(this);
 
 				s.request(Long.MAX_VALUE);

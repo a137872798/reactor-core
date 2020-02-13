@@ -24,6 +24,7 @@ import reactor.util.annotation.Nullable;
 /**
  * Indicates that a task or resource can be cancelled/disposed.
  * <p>Call to the dispose method is/should be idempotent.
+ * 可丢弃接口
  */
 @FunctionalInterface
 public interface Disposable {
@@ -32,6 +33,7 @@ public interface Disposable {
 	 * Cancel or dispose the underlying task or resource.
 	 * <p>
 	 * Implementations are required to make this method idempotent.
+	 * 丢弃或者关闭 某个任务或资源
 	 */
 	void dispose();
 
@@ -43,6 +45,7 @@ public interface Disposable {
 	 * when there's a guarantee the resource or task is disposed.
 	 *
 	 * @return {@literal true} when there's a guarantee the resource or task is disposed.
+	 * 默认情况下 处于不可丢弃的状态
 	 */
 	default boolean isDisposed() {
 		return false;
@@ -53,6 +56,7 @@ public interface Disposable {
 	 * atomically and with respect of disposing the container itself.
 	 *
 	 * @author Simon Baslé
+	 * 代表 2个 disposable 的 替换关系  当替换成新的 disposable 时 选择 触发 dispose 或者不触发
 	 */
 	interface Swap extends Disposable, Supplier<Disposable> {
 
@@ -63,6 +67,7 @@ public interface Disposable {
 		 * @param next the {@link Disposable} to set, may be null
 		 * @return true if the operation succeeded, false if the container has been disposed
 		 * @see #replace(Disposable)
+		 * 更替内部的元素 并丢弃当前元素
 		 */
 		boolean update(@Nullable Disposable next);
 
@@ -73,6 +78,7 @@ public interface Disposable {
 		 * @param next the {@link Disposable} to set, may be null
 		 * @return true if the operation succeeded, false if the container has been disposed
 		 * @see #update(Disposable)
+		 * 原子设置下一个元素到当前容器中 同时没有丢弃掉上一个元素
 		 */
 		boolean replace(@Nullable Disposable next);
 	}
@@ -87,6 +93,7 @@ public interface Disposable {
 	 * disposed, the container cannot be reused and you will need a new {@link Composite}.
 	 *
 	 * @author Simon Baslé
+	 * 该接口 用于组合多个 disposable 对象
 	 */
 	interface Composite extends Disposable {
 
@@ -96,6 +103,8 @@ public interface Disposable {
 		 *
 		 * @param d the {@link Disposable} to add.
 		 * @return true if the disposable could be added, false otherwise.
+		 * 如果内部对象 isDisposed 还是 false  将一个元素 添加到 composite 中
+		 * 否则 直接触发传入对象的 disposed
 		 */
 		boolean add(Disposable d);
 
@@ -109,10 +118,13 @@ public interface Disposable {
 		 * {@link Disposables#composite()} variants.
 		 * @param ds the collection of Disposables
 		 * @return true if the operation was successful, false if the container has been disposed
+		 * 将一组 disposable 添加到容器中
 		 */
 		default boolean addAll(Collection<? extends Disposable> ds) {
+			// 首先判断当前对象 是否已经被丢弃
 			boolean abort = isDisposed();
 			for (Disposable d : ds) {
+				// 如果已经被丢弃的情况 尝试添加的新元素 会立即触发 dispose
 				if (abort) {
 					//multi-add aborted,
 					d.dispose();
@@ -121,6 +133,7 @@ public interface Disposable {
 					//update the abort flag by attempting to add the disposable
 					//if not added, it has already been disposed. we abort and will
 					//dispose all subsequent Disposable
+					// 否则将元素挨个添加
 					abort = !add(d);
 				}
 			}
@@ -132,6 +145,7 @@ public interface Disposable {
 		 * dispose all the previously contained Disposables. From there on the container cannot
 		 * be reused, as {@link #add(Disposable)} and {@link #addAll(Collection)} methods
 		 * will immediately return {@literal false}.
+		 * 丢弃内部所有元素
 		 */
 		@Override
 		void dispose();
@@ -142,6 +156,7 @@ public interface Disposable {
 		 * {@link #add(Disposable)} and {@link #addAll(Collection)} will be rejected.
 		 *
 		 * @return true if the container has been disposed, false otherwise.
+		 * 判断当前元素是否已经被丢弃
 		 */
 		@Override
 		boolean isDisposed();
@@ -156,6 +171,7 @@ public interface Disposable {
 		 *
 		 * @param d the {@link Disposable} to remove.
 		 * @return true if the disposable was successfully deleted, false otherwise.
+		 * 从 composite 中 移除掉某个 可丢弃对象
 		 */
 		boolean remove(Disposable d);
 

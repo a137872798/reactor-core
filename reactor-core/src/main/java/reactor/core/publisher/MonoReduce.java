@@ -31,6 +31,7 @@ import reactor.util.context.Context;
  * @param <T> the input and output value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * reduce 函数只会发射一个 最终结果 而scan 每次累加得到的中间结果也会下发
  */
 final class MonoReduce<T> extends MonoFromFluxOperator<T, T>
 		implements Fuseable {
@@ -47,6 +48,10 @@ final class MonoReduce<T> extends MonoFromFluxOperator<T, T>
 		return new ReduceSubscriber<>(actual, aggregator);
 	}
 
+	/**
+	 * 累加对象
+	 * @param <T>
+	 */
 	static final class ReduceSubscriber<T> extends Operators.MonoSubscriber<T, T> {
 
 		final BiFunction<T, T, T> aggregator;
@@ -70,6 +75,10 @@ final class MonoReduce<T> extends MonoFromFluxOperator<T, T>
 			return super.scanUnsafe(key);
 		}
 
+		/**
+		 * 设置上游对象
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {

@@ -84,6 +84,8 @@ import reactor.util.context.Context;
  * </p>
  *
  * @param <T> the input and output type
+ *           processor 代表了 同时具备pub 和sub 的功能
+ *           unicast 代表单播
  */
 public final class UnicastProcessor<T>
 		extends FluxProcessor<T, T>
@@ -143,7 +145,13 @@ public final class UnicastProcessor<T>
 		return new UnicastProcessor<>(queue, onOverflow, endcallback);
 	}
 
+	/**
+	 * 作为中转站的职能 用于存储上游数据
+	 */
 	final Queue<T>            queue;
+    /**
+     * 当数据超负荷时 执行的函数
+     */
 	final Consumer<? super T> onOverflow;
 
 	volatile Disposable onTerminate;
@@ -154,6 +162,9 @@ public final class UnicastProcessor<T>
 	volatile boolean done;
 	Throwable error;
 
+    /**
+     * 代表该对象一次只能设置一个订阅者
+     */
 	volatile CoreSubscriber<? super T> actual;
 
 	volatile boolean cancelled;
@@ -175,6 +186,10 @@ public final class UnicastProcessor<T>
 
 	boolean outputFused;
 
+	/**
+	 * 使用一个队列来做初始化
+	 * @param queue
+	 */
 	public UnicastProcessor(Queue<T> queue) {
 		this.queue = Objects.requireNonNull(queue, "queue");
 		this.onTerminate = null;
@@ -213,6 +228,10 @@ public final class UnicastProcessor<T>
 		}
 	}
 
+    /**
+     * 将队列中的数据下发
+     * @param a
+     */
 	void drainRegular(Subscriber<? super T> a) {
 		int missed = 1;
 
@@ -295,6 +314,9 @@ public final class UnicastProcessor<T>
 		}
 	}
 
+    /**
+     * 将队列中存放的数据发送到下游
+     */
 	void drain() {
 		if (WIP.getAndIncrement(this) != 0) {
 			return;
@@ -341,6 +363,10 @@ public final class UnicastProcessor<T>
 		return false;
 	}
 
+	/**
+	 * 该对象作为 sub 去订阅其他pub时
+	 * @param s
+	 */
 	@Override
 	public void onSubscribe(Subscription s) {
 		if (done || cancelled) {
@@ -361,6 +387,10 @@ public final class UnicastProcessor<T>
 		return actual != null ? actual.currentContext() : Context.empty();
 	}
 
+    /**
+     * 接收上游数据
+     * @param t
+     */
 	@Override
 	public void onNext(T t) {
 		if (done || cancelled) {
@@ -368,6 +398,7 @@ public final class UnicastProcessor<T>
 			return;
 		}
 
+		// 将数据存储在queue 中
 		if (!queue.offer(t)) {
 			Throwable ex = Operators.onOperatorError(null,
 					Exceptions.failWithOverflow(), t, currentContext());
@@ -383,6 +414,7 @@ public final class UnicastProcessor<T>
 			onError(Operators.onOperatorError(null, ex, t, currentContext()));
 			return;
 		}
+		// 下发数据
 		drain();
 	}
 
@@ -414,6 +446,10 @@ public final class UnicastProcessor<T>
 		drain();
 	}
 
+    /**
+     * 将本对象作为 pub 接收订阅对象
+     * @param actual the {@link Subscriber} interested into the published sequence
+     */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		Objects.requireNonNull(actual, "subscribe");
@@ -432,6 +468,10 @@ public final class UnicastProcessor<T>
 		}
 	}
 
+    /**
+     * 当下游订阅者 向本对象请求数据时
+     * @param n
+     */
 	@Override
 	public void request(long n) {
 		if (Operators.validate(n)) {

@@ -51,6 +51,9 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 	final Duration            ttl;
 	final Scheduler           ttlScheduler;
 	final int                 bufferSize;
+	/**
+	 * 当出现背压超负荷时的处理
+	 */
 	final Consumer<? super O> onBufferEviction;
 
 	FluxOnBackpressureBufferTimeout(Flux<? extends O> source,
@@ -86,6 +89,10 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 		return super.scanUnsafe(key);
 	}
 
+	/**
+	 * 加工传入的订阅者
+	 * @param <T>
+	 */
 	static final class BackpressureBufferTimeoutSubscriber<T> extends ArrayDeque<Object>
 			implements InnerOperator<T, T>, Runnable {
 
@@ -128,6 +135,7 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 			this.ttl = ttl;
 			this.ttlScheduler = Objects.requireNonNull(ttlScheduler,
 					"ttl Scheduler must not be null");
+			// 获取到某个线程池
 			this.worker = ttlScheduler.createWorker();
 		}
 
@@ -168,6 +176,10 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 			return actual;
 		}
 
+		/**
+		 * 当下游对象向本对象拉取数据时触发
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
@@ -187,6 +199,9 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 			}
 		}
 
+		/**
+		 * 清空队列中的元素
+		 */
 		@SuppressWarnings("unchecked")
 		void clearQueue() {
 			for (; ; ) {
@@ -196,6 +211,7 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 						break;
 					}
 
+					// 每次都会弹出2个元素 也就是 插入应该也是2个元素
 					this.poll();
 					evicted = (T) this.poll();
 				}
@@ -204,22 +220,33 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 			}
 		}
 
+		/**
+		 * 首先触发该方法 将上游数据发送到该对象
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
 
+				// 让下游对象向本对象拉取数据
 				actual.onSubscribe(this);
 
+				// 拉取所有上游数据
 				s.request(Long.MAX_VALUE);
 			}
 		}
 
+		/**
+		 * 接收上游下发的数据
+		 * @param t
+		 */
 		@SuppressWarnings("unchecked")
 		@Override
 		public void onNext(T t) {
 			T evicted = null;
 			synchronized (this) {
+				// 因为每次往队列中都是一次插入2个元素  所以这里用 双倍长度来评估 超过的情况会先弹出最前面的数据
 				if (this.size() == bufferSizeDouble) {
 					this.poll();
 					evicted = (T) this.poll();
@@ -229,6 +256,7 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 			}
 			evict(evicted);
 			try {
+				// 定时执行任务
 				worker.schedule(this, ttl.toMillis(), TimeUnit.MILLISECONDS);
 			}
 			catch (RejectedExecutionException re) {
@@ -252,6 +280,9 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 			drain();
 		}
 
+		/**
+		 * 当上游的数据传播到 下游时 在一定延时后会触发该方法
+		 */
 		@SuppressWarnings("unchecked")
 		@Override
 		public void run() {
@@ -265,9 +296,11 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 				T evicted = null;
 
 				synchronized (this) {
+					// 查看最上面一个元素 不弹出
 					Long ts = (Long) this.peek();
 					empty = ts == null;
 					if (!empty) {
+						// 定期清理过时的元素  正常情况下 是不需要这个任务的 看来下游又需要切线程了
 						if (ts <= ttlScheduler.now(TimeUnit.MILLISECONDS) - ttl.toMillis()) {
 							this.poll();
 							evicted = (T) this.poll();
@@ -289,6 +322,10 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 			}
 		}
 
+		/**
+		 * 驱逐掉某个元素
+		 * @param evicted
+		 */
 		void evict(@Nullable T evicted) {
 			if (evicted != null) {
 				try {
@@ -307,6 +344,9 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 			}
 		}
 
+		/**
+		 * 将上游数据通过中转器 转发到下游
+		 */
 		@SuppressWarnings("unchecked")
 		void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
@@ -321,6 +361,7 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 
 				while (e != r) {
 					if (cancelled) {
+						// 如果本对象已经被关闭了 清空队列  在evict 时 会触发消费者钩子
 						clearQueue();
 						return;
 					}
@@ -339,6 +380,7 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 
 					boolean empty = v == null;
 
+					// 代表已经没有数据了 触发 onComplete
 					if (d && empty) {
 						Throwable ex = error;
 						if (ex != null) {
@@ -356,6 +398,7 @@ final class FluxOnBackpressureBufferTimeout<O> extends InternalFluxOperator<O, O
 						break;
 					}
 
+					// 将数据传播到下游
 					actual.onNext(v);
 
 					e++;

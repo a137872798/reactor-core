@@ -22,6 +22,7 @@ import reactor.core.CoreSubscriber;
  * A connecting {@link Flux} Publisher (right-to-left from a composition chain perspective)
  *
  * @param <I> Upstream type
+ *           适配对象
  */
 final class FluxSourceMono<I> extends FluxFromMonoOperator<I, I> {
 

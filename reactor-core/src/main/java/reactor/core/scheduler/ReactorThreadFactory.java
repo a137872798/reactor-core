@@ -29,14 +29,27 @@ import reactor.util.annotation.Nullable;
  * creating {@link Thread} with a prefix (which can be retrieved with the {@link #get()} method).
  *
  * @author Simon Baslé
+ * 响应式编程中 调度器内线程池工厂
  */
 class ReactorThreadFactory implements ThreadFactory,
                                       Supplier<String>,
                                       Thread.UncaughtExceptionHandler {
 
+	/**
+	 * 代表该线程工厂归属于哪个调度器
+	 */
 	final private String                        name;
+	/**
+	 * 计数器对象
+	 */
 	final private AtomicLong                    counterReference;
+	/**
+	 * 创建的线程是否是守护线程
+	 */
 	final private boolean                       daemon;
+	/**
+	 * 是否拒绝阻塞
+	 */
 	final private boolean                       rejectBlocking;
 
 	@Nullable
@@ -54,10 +67,16 @@ class ReactorThreadFactory implements ThreadFactory,
 		this.uncaughtExceptionHandler = uncaughtExceptionHandler;
 	}
 
+	/**
+	 * 核心方法  用于创建新线程
+	 * @param runnable
+	 * @return
+	 */
 	@Override
 	public final Thread newThread(@NotNull Runnable runnable) {
 		String newThreadName = name + "-" + counterReference.incrementAndGet();
 		Thread t = rejectBlocking
+				// 创建不支持阻塞的线程  子类通过判断是否是 NonBlocking 来执行一些对应的操作
 				? new NonBlockingThread(runnable, newThreadName)
 				: new Thread(runnable, newThreadName);
 		if (daemon) {

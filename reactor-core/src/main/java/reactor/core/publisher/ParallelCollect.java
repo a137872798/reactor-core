@@ -32,6 +32,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the input value type
  * @param <C> the collection type
+ *           并行容器 就是将数据分批 填入到各个容器中 分别传到下游 跟 FluxCollect 一个套路
  */
 final class ParallelCollect<T, C> extends ParallelFlux<C> implements Scannable, Fuseable {
 
@@ -63,8 +64,15 @@ final class ParallelCollect<T, C> extends ParallelFlux<C> implements Scannable, 
 		return Integer.MAX_VALUE;
 	}
 
+	/**
+	 * 通过一组订阅者订阅
+	 * @param subscribers the subscribers array to run in parallel, the number of items
+	 * must be equal to the parallelism level of this ParallelFlux
+	 *                    parallelFlux 本身是一个并行对象 当被订阅时可以设置一组订阅者 数量与并行度一致
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super C>[] subscribers) {
+		// 确保数组长度与并行度一致
 		if (!validate(subscribers)) {
 			return;
 		}
@@ -74,6 +82,7 @@ final class ParallelCollect<T, C> extends ParallelFlux<C> implements Scannable, 
 
 		for (int i = 0; i < n; i++) {
 
+			// 生成对应数量的容器 并生成包装对象
 			C initialValue;
 
 			try {
@@ -91,6 +100,7 @@ final class ParallelCollect<T, C> extends ParallelFlux<C> implements Scannable, 
 					collector);
 		}
 
+		// 通过该对象接收上游数据 同样的 上游数据会以并行方式下发到每个订阅者
 		source.subscribe(parents);
 	}
 
@@ -105,6 +115,11 @@ final class ParallelCollect<T, C> extends ParallelFlux<C> implements Scannable, 
 		return source.parallelism();
 	}
 
+	/**
+	 * 该对象作为转发对象 接收上游数据 并保存到容器后 将容器下发到最下游
+	 * @param <T>
+	 * @param <C>
+	 */
 	static final class ParallelCollectSubscriber<T, C>
 			extends Operators.MonoSubscriber<T, C> {
 
@@ -161,6 +176,9 @@ final class ParallelCollect<T, C> extends ParallelFlux<C> implements Scannable, 
 			actual.onError(t);
 		}
 
+		/**
+		 * 调用 complete 会将容器设置到 value 父类骨架会将结果下发到子订阅者
+		 */
 		@Override
 		public void onComplete() {
 			if (done) {

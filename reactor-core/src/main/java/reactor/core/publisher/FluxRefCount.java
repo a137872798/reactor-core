@@ -35,11 +35,18 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 生成引用数对象
  */
 final class FluxRefCount<T> extends Flux<T> implements Scannable, Fuseable {
 
+	/**
+	 * 数据源
+	 */
 	final ConnectableFlux<? extends T> source;
-	
+
+	/**
+	 * 最少订阅数
+	 */
 	final int n;
 
 	@Nullable
@@ -58,6 +65,10 @@ final class FluxRefCount<T> extends Flux<T> implements Scannable, Fuseable {
 		return source.getPrefetch();
 	}
 
+	/**
+	 * 当某个对象尝试订阅
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		RefCountMonitor<T> conn;
@@ -66,20 +77,26 @@ final class FluxRefCount<T> extends Flux<T> implements Scannable, Fuseable {
 		synchronized (this) {
 			conn = connection;
 			if (conn == null || conn.terminated) {
+				// 初始化监控对象
 				conn = new RefCountMonitor<>(this);
 				connection = conn;
 			}
 
+			// 每增加一个订阅者 记录当前连接数量  (RefCount 本身就是用来统计当前连接数的)
 			long c = conn.subscribers;
 			conn.subscribers = c + 1;
+			// 当达到连接数时 修改成 已连接 (connected)
 			if (!conn.connected && c + 1 == n) {
 				connect = true;
 				conn.connected = true;
 			}
 		}
 
+		// 每个订阅者都被包装成inner 对象 并交由conn 调控   此时source 本身也是一个 connectableFlux 也就是 触发下游的时机 应该
+		// 也是要到最小订阅者数量
 		source.subscribe(new RefCountInner<>(actual, conn));
 
+		// 达到数量才触发 connect   推测 connect 才会真正将上游的数据发送到下游
 		if (connect) {
 			source.connect(conn);
 		}
@@ -124,6 +141,10 @@ final class FluxRefCount<T> extends Flux<T> implements Scannable, Fuseable {
 		return null;
 	}
 
+	/**
+	 * 连接数监控对象
+	 * @param <T>
+	 */
 	static final class RefCountMonitor<T> implements Consumer<Disposable> {
 
 		final FluxRefCount<? extends T> parent;
@@ -159,7 +180,14 @@ final class FluxRefCount<T> extends Flux<T> implements Scannable, Fuseable {
 	static final class RefCountInner<T>
 			implements QueueSubscription<T>, InnerOperator<T, T> {
 
+		/**
+		 * 实际订阅者
+		 */
 		final CoreSubscriber<? super T> actual;
+
+		/**
+		 * 被该监控器管理
+		 */
 		final RefCountMonitor<T> connection;
 
 		Subscription s;

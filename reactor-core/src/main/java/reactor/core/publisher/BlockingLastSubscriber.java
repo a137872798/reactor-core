@@ -21,14 +21,23 @@ package reactor.core.publisher;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">https://github.com/reactor/reactive-streams-commons</a>
+ * 阻塞直到读取到最后一个元素时 解除
  */
 final class BlockingLastSubscriber<T> extends BlockingSingleSubscriber<T> {
 
+	/**
+	 * 每次触发 onNext 内部的value 都会更换  当调用 onComplete 时触发解锁
+	 * @param t
+	 */
 	@Override
 	public void onNext(T t) {
 		value = t;
 	}
 
+	/**
+	 * 当遇到异常时 也是直接解锁
+	 * @param t
+	 */
 	@Override
 	public void onError(Throwable t) {
 		value = null;

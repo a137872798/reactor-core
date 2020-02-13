@@ -68,6 +68,7 @@ public abstract class Hooks {
 	 * @see #resetOnEachOperator(String)
 	 * @see #resetOnEachOperator()
 	 * @see #onLastOperator(Function)
+	 * 设置一个钩子函数 确保在每个操作中都会触发
 	 */
 	public static void onEachOperator(Function<? super Publisher<Object>, ? extends Publisher<Object>> onEachOperator) {
 		onEachOperator(onEachOperator.toString(), onEachOperator);
@@ -147,6 +148,7 @@ public abstract class Hooks {
 	 * for as many consumer invocations (even if called with the same consumer instance).
 	 *
 	 * @param c the {@link Consumer} to apply to dropped errors
+	 *          设置某个动作对应的钩子
 	 */
 	public static void onErrorDropped(Consumer<? super Throwable> c) {
 		Objects.requireNonNull(c, "onErrorDroppedHook");
@@ -502,6 +504,11 @@ public abstract class Hooks {
 		return composite;
 	}
 
+	/**
+	 * 将一组 fun 整合成一个 fun
+	 * @param hooks
+	 * @return
+	 */
 	@Nullable
 	static BiFunction<? super Throwable, Object, ? extends Throwable> createOrUpdateOpErrorHook(Collection<BiFunction<? super Throwable, Object, ? extends Throwable>> hooks) {
 		BiFunction<? super Throwable, Object, ? extends Throwable> composite = null;
@@ -520,6 +527,9 @@ public abstract class Hooks {
 	//Hooks that are transformative
 	static Function<Publisher, Publisher> onEachOperatorHook;
 	static volatile Function<Publisher, Publisher> onLastOperatorHook;
+	/**
+	 * 该钩子是默认情况下 如果在消费 subscription 时 出现异常会使用的钩子函数
+	 */
 	static volatile BiFunction<? super Throwable, Object, ? extends Throwable> onOperatorErrorHook;
 
 	//Hooks that are just callbacks

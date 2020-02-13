@@ -27,6 +27,9 @@ import java.util.stream.Stream;
 
 import reactor.util.annotation.Nullable;
 
+/**
+ * 当 键值对 超过5组时  使用contextN来包装  该对象继承与 LinkedHashMap  同时实现 一元，二元消费者接口
+ */
 @SuppressWarnings("unchecked")
 final class ContextN extends LinkedHashMap<Object, Object>
 		implements CoreContext, BiConsumer<Object, Object>, Consumer<Entry<Object, Object>> {

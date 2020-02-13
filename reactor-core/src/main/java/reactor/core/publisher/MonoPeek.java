@@ -29,6 +29,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象相当于一个 钩子对象 当触发对应的方法 时  同时触发对应的钩子
  */
 final class MonoPeek<T> extends InternalMonoOperator<T, T> implements SignalPeek<T> {
 

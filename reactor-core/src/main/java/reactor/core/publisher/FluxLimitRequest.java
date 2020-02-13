@@ -24,9 +24,13 @@ import reactor.core.CoreSubscriber;
 /**
  * @author Simon Baslé
  * @author David Karnok
+ * 限制发往下游的数据
  */
 final class FluxLimitRequest<T> extends InternalFluxOperator<T, T> {
 
+	/**
+	 * 代表限制量
+	 */
 	final long cap;
 
 	FluxLimitRequest(Flux<T> flux, long cap) {
@@ -34,6 +38,11 @@ final class FluxLimitRequest<T> extends InternalFluxOperator<T, T> {
 		this.cap = cap;
 	}
 
+	/**
+	 * 加工订阅者
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super T> actual) {
 		return new FluxLimitRequestSubscriber<>(actual, this.cap);
@@ -52,6 +61,10 @@ final class FluxLimitRequest<T> extends InternalFluxOperator<T, T> {
 		return super.scanUnsafe(key);
 	}
 
+	/**
+	 * 该对象 会限制发送到下游的数据量
+	 * @param <T>
+	 */
 	static class FluxLimitRequestSubscriber<T> implements InnerOperator<T, T> {
 
 		final CoreSubscriber<? super T> actual;

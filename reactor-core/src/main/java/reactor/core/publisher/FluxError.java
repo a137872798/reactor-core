@@ -29,6 +29,7 @@ import reactor.core.CoreSubscriber;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象会在 调用 subscribe() 时 触发 onError
  */
 final class FluxError<T> extends Flux<T> implements Fuseable.ScalarCallable, SourceProducer<T> {
 

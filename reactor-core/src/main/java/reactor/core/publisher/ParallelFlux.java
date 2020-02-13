@@ -72,6 +72,7 @@ import reactor.util.context.Context;
  *
  *
  * @param <T> the value type
+ *           并行flux  会并发的触发下游的onNext
  */
 public abstract class ParallelFlux<T> implements CorePublisher<T> {
 
@@ -83,6 +84,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * @param source the source Publisher
 	 *
 	 * @return the {@link ParallelFlux} instance
+	 * 将一个 pub 加工成并行flux
 	 */
 	public static <T> ParallelFlux<T> from(Publisher<? extends T> source) {
 		return from(source, Schedulers.DEFAULT_POOL_SIZE, Queues.SMALL_BUFFER_SIZE,
@@ -119,6 +121,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * from the source until there is a rail ready to process it.
 	 *
 	 * @return the new {@link ParallelFlux} instance
+	 * 上游的数据以轮询的方式 发往下游每个订阅者
 	 */
 	public static <T> ParallelFlux<T> from(Publisher<? extends T> source,
 			int parallelism,
@@ -140,6 +143,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * @param publishers the array of publishers
 	 *
 	 * @return the new {@link ParallelFlux} instance
+	 * 每个上游对象 刚好对应一个下游对象
 	 */
 	@SafeVarargs
 	public static <T> ParallelFlux<T> from(Publisher<T>... publishers) {
@@ -154,6 +158,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * @param converter the converter function from {@link ParallelFlux} to some type
 	 *
 	 * @return the value returned by the converter function
+	 * 将 flux 对象转换成另一个对象
 	 */
 	public final <U> U as(Function<? super ParallelFlux<T>, U> converter) {
 		return converter.apply(this);
@@ -258,6 +263,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * item
 	 *
 	 * @return the new {@link ParallelFlux} instance
+	 * 将本对象的数据 先存储到 collect 后再下发
 	 */
 	public final <C> ParallelFlux<C> collect(Supplier<? extends C> collectionSupplier,
 			BiConsumer<? super C, ? super T> collector) {
@@ -288,20 +294,24 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * @param capacityHint the expected number of total elements
 	 *
 	 * @return the new Mono instance
+	 * 将接收到的数据排序后下发
 	 */
 	public final Mono<List<T>> collectSortedList(Comparator<? super T> comparator,
 			int capacityHint) {
 		int ch = capacityHint / parallelism() + 1;
 		ParallelFlux<List<T>> railReduced =
+				// 代表初始值是一个 arrayList 同时累加函数就是每次将结果添加到容器中
 				reduce(() -> new ArrayList<>(ch), (a, b) -> {
 					a.add(b);
 					return a;
 				});
+		// 因为 railReduced 最后只会下发一个数据 相当于是一个mono 所以这里的 sort() 只会触发一次 (多并行度 就是多个list)
 		ParallelFlux<List<T>> railSorted = railReduced.map(list -> {
 			list.sort(comparator);
 			return list;
 		});
 
+		// 因为railSorted 实际上会下发多个list 这里还要再结合一次
 		Mono<List<T>> merged = railSorted.reduce((a, b) -> sortedMerger(a, b, comparator));
 
 		return merged;
@@ -343,6 +353,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * inner Publishers (immediate, boundary, end)
 	 *
 	 * @return the new {@link ParallelFlux} instance
+	 * 将 parallelFlux 的数据 分流后 每组分流的数据又被看作是pub 之后就跟FluxConcatMap 一样了
 	 */
 	public final <R> ParallelFlux<R> concatMap(Function<? super T, ? extends Publisher<? extends R>> mapper) {
 		return concatMap(mapper, 2, ErrorMode.IMMEDIATE);
@@ -530,6 +541,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * value
 	 *
 	 * @return the new {@link ParallelFlux} instance
+	 * 每个下发的数据 通过谓语条件后才下发
 	 */
 	public final ParallelFlux<T> filter(Predicate<? super T> predicate) {
 		Objects.requireNonNull(predicate, "predicate");
@@ -640,6 +652,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * as well.
 	 *
 	 * @return a new {@link ParallelFlux} defeating any {@link Publisher} / {@link Subscription} feature-detection
+	 * 创建简单的包装对象
 	 */
 	public final ParallelFlux<T> hide() {
 		return new ParallelFluxHide<>(this);
@@ -752,6 +765,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * @param mapper the mapper function turning Ts into Us.
 	 *
 	 * @return the new {@link ParallelFlux} instance
+	 * 将结果作映射后传播到下游
 	 */
 	public final <U> ParallelFlux<U> map(Function<? super T, ? extends U> mapper) {
 		Objects.requireNonNull(mapper, "mapper");
@@ -795,6 +809,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * @return the new Flux instance
 	 *
 	 * @see ParallelFlux#ordered(Comparator)
+	 * 将数据排序后下发
 	 */
 	public final Flux<T> ordered(Comparator<? super T> comparator, int prefetch) {
 		return new ParallelMergeOrdered<>(this, prefetch, Queues.get(prefetch), comparator);
@@ -804,6 +819,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * Returns the number of expected parallel Subscribers.
 	 *
 	 * @return the number of expected parallel Subscribers
+	 * 返回并行度
 	 */
 	public abstract int parallelism();
 
@@ -866,6 +882,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * @param scheduler the scheduler to use
 	 *
 	 * @return the new {@link ParallelFlux} instance
+	 * 这里在指定的 调度器(线程)执行
 	 */
 	public final ParallelFlux<T> runOn(Scheduler scheduler) {
 		return runOn(scheduler, Queues.SMALL_BUFFER_SIZE);
@@ -912,6 +929,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * @return the new Flux instance
 	 *
 	 * @see ParallelFlux#sequential(int)
+	 * 将本对象做串行化处理
 	 */
 	public final Flux<T> sequential() {
 		return sequential(Queues.SMALL_BUFFER_SIZE);
@@ -977,6 +995,8 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 *
 	 * @param subscribers the subscribers array to run in parallel, the number of items
 	 * must be equal to the parallelism level of this ParallelFlux
+	 *                    parallelFlux 本身是一个并行对象 当被订阅时可以设置一组订阅者 数量与并行度一致
+	 *                    就是将上游的数据 以一种看似并行的方式往下游多个订阅者发送数据  (不一定要使用多线程)
 	 */
 	protected abstract void subscribe(CoreSubscriber<? super T>[] subscribers);
 
@@ -1025,12 +1045,17 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 		return subscribe(onNext, onError, onComplete, (Context) null);
 	}
 
+	/**
+	 * 覆盖了 父类的单订阅者方法
+	 * @param s
+	 */
 	@Override
 	@SuppressWarnings("unchecked")
 	public final void subscribe(CoreSubscriber<? super T> s) {
 		FluxHide.SuppressFuseableSubscriber<T> subscriber =
 				new FluxHide.SuppressFuseableSubscriber<>(Operators.toCoreSubscriber(s));
 
+		// 将数据串行化后进行订阅
 		sequential().subscribe(Operators.toCoreSubscriber(subscriber));
 	}
 
@@ -1139,6 +1164,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 *
 	 * @return the new Mono instance emitting the reduced value or empty if the
 	 * {@link ParallelFlux} was empty
+	 * 忽略所有元素 只触发 onComplete 或者 onError
 	 */
 	public final Mono<Void> then() {
 		return Mono.onAssembly(new ParallelThen(this));
@@ -1196,6 +1222,7 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 	 * @param subscribers the array of Subscribers
 	 *
 	 * @return true if the number of subscribers equals to the parallelism level
+	 * 确保并行度 和数组数量一致
 	 */
 	protected final boolean validate(Subscriber<?>[] subscribers) {
 		int p = parallelism();
@@ -1341,6 +1368,14 @@ public abstract class ParallelFlux<T> implements CorePublisher<T> {
 				onCancel));
 	}
 
+	/**
+	 * 结合list
+	 * @param a
+	 * @param b
+	 * @param comparator
+	 * @param <T>
+	 * @return
+	 */
 	static final <T> List<T> sortedMerger(List<T> a, List<T> b, Comparator<? super T> comparator) {
 		int n = a.size() + b.size();
 		if (n == 0) {

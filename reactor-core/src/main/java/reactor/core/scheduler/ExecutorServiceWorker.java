@@ -25,11 +25,18 @@ import reactor.core.Scannable;
 
 /**
  * @author Stephane Maldini
+ * 通过调度器来创建
  */
 final class ExecutorServiceWorker implements Scheduler.Worker, Disposable, Scannable {
 
+	/**
+	 * 执行者
+	 */
 	final ScheduledExecutorService exec;
 
+	/**
+	 * 该接口代表一组任务  默认情况下内部为空 需要从外部不断添加
+	 */
 	final Composite tasks;
 
 
@@ -38,6 +45,11 @@ final class ExecutorServiceWorker implements Scheduler.Worker, Disposable, Scann
 		this.tasks = Disposables.composite();
 	}
 
+	/**
+	 * 执行某个任务  同时会添加到 tasks 中 便于维护
+	 * @param task the task to schedule
+	 * @return
+	 */
 	@Override
 	public Disposable schedule(Runnable task) {
 		return Schedulers.workerSchedule(exec, tasks, task, 0L, TimeUnit.MILLISECONDS);

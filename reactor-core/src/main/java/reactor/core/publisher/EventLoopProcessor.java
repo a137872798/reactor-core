@@ -43,6 +43,8 @@ import reactor.util.context.Context;
  * A base processor used by executor backed processors to take care of their ExecutorService
  *
  * @author Stephane Maldini
+ * processor 就是一个 中转站的抽象  既可以作为pub 又可以作为sub  通过sub 的职能 订阅其他数据源  之后又作为 pub 使得订阅本对象的 sub 可以接收到
+ * 本对象从上游收到的数据  该对象的2个子类都已经被废弃 该对象先不看
  */
 @SuppressWarnings("deprecation")
 abstract class EventLoopProcessor<IN> extends FluxProcessor<IN, IN>

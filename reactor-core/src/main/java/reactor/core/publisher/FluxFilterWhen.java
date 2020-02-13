@@ -52,8 +52,14 @@ import reactor.util.context.Context;
 //adapted from RxJava2Extensions: https://github.com/akarnokd/RxJava2Extensions/blob/master/src/main/java/hu/akarnokd/rxjava2/operators/FlowableFilterAsync.java
 class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 
+	/**
+	 * 触发 onNext 的对象会通过该谓语
+	 */
 	final Function<? super T, ? extends Publisher<Boolean>> asyncPredicate;
 
+	/**
+	 * 代表存储元素的队列大小
+	 */
 	final int bufferSize;
 
 	FluxFilterWhen(Flux<T> source,
@@ -69,6 +75,10 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 		return new FluxFilterWhenSubscriber<>(actual, asyncPredicate, bufferSize);
 	}
 
+	/**
+	 * 包装订阅者对象
+	 * @param <T>
+	 */
 	static final class FluxFilterWhenSubscriber<T> implements InnerOperator<T, T> {
 
 		final Function<? super T, ? extends Publisher<Boolean>> asyncPredicate;
@@ -80,6 +90,9 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 		int          consumed;
 		long         consumerIndex;
 		long         emitted;
+		/**
+		 * 对用 current 的结果
+		 */
 		Boolean      innerResult;
 		long         producerIndex;
 		Subscription upstream;
@@ -104,8 +117,17 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 		@SuppressWarnings("ConstantConditions")
 		static final FilterWhenInner INNER_CANCELLED = new FilterWhenInner(null, false);
 
+		/**
+		 * 代表初始阶段
+		 */
 		static final int STATE_FRESH   = 0;
+		/**
+		 * 代表已经为  某个数据生成 Pub<Boolean> 对象
+		 */
 		static final int STATE_RUNNING = 1;
+		/**
+		 * 代表 Pub<Boolean> 对象已经下发结果
+		 */
 		static final int STATE_RESULT  = 2;
 
 		FluxFilterWhenSubscriber(CoreSubscriber<? super T> actual,
@@ -123,12 +145,18 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 			return actual;
 		}
 
+		/**
+		 * 上游传播数据到 转发对象
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			long pi = producerIndex;
 			int m = toFilter.length() - 1;
 
+			// 获取当前偏移量   注意这是一个wheel
 			int offset = (int)pi & m;
+			// 更新数组
 			toFilter.lazySet(offset, t);
 			producerIndex = pi + 1;
 			drain();
@@ -141,6 +169,9 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 			drain();
 		}
 
+		/**
+		 * 代表上游的所有数据都已经下发
+		 */
 		@Override
 		public void onComplete() {
 			done = true;
@@ -186,15 +217,23 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 			innerResult = null;
 		}
 
+		/**
+		 * 首先触发该方法  设置上游对象
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(upstream, s)) {
 				upstream = s;
+				// 连接到下游对象 并触发 request方法
 				actual.onSubscribe(this);
 				s.request(bufferSize);
 			}
 		}
 
+		/**
+		 * 尝试拉取数据
+		 */
 		@SuppressWarnings("unchecked")
 		void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
@@ -221,6 +260,7 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 					boolean d = done;
 
 					int offset = (int)ci & m;
+					// 获取原子数据对应的数据
 					T t = toFilter.get(offset);
 					boolean empty = t == null;
 
@@ -239,9 +279,11 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 					}
 
 					int s = state;
+					// 代表 初始状态  或者某个谓语结果刚刚被消耗
 					if (s == STATE_FRESH) {
 						Publisher<Boolean> p;
 
+						// 使用谓语对象处理元素  生成一个 pub 该对象会往下发一个 boolean 代表本次谓语处理的结果
 						try {
 							p = Objects.requireNonNull(asyncPredicate.apply(t), "The asyncPredicate returned a null value");
 						} catch (Throwable ex) {
@@ -270,7 +312,10 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 									Operators.onDiscard(t, ctx);
 								}
 							} else {
+								// 创建一个 inner 对象 并订阅用谓语产生的pub对象
 								FilterWhenInner inner = new FilterWhenInner(this, !(p instanceof Mono));
+								// innerResult 的结果对应 current
+								// 如果 上个元素已经抢占了位置 那么 current 已经被设置好了  那么只能尝试将元素存放到数组中 等待 上一个pub先发射数据
 								if (CURRENT.compareAndSet(this,null, inner)) {
 									state = STATE_RUNNING;
 									p.subscribe(inner);
@@ -279,18 +324,22 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 							}
 						}
 
+						// 代表 current 被其他线程抢占了 丢弃该元素
 						T old = toFilter.getAndSet(offset, null);
 						Operators.onDiscard(old, ctx);
 						ci++;
+						// 增加 consumer 相关的偏移量  当达到limit 时 申请下一批数据
 						if (++f == limit) {
 							f = 0;
 							upstream.request(limit);
 						}
+						// 如果刚好有个 pub 生成了结果
 					} else
 					if (s == STATE_RESULT) {
 						Boolean u = innerResult;
 						innerResult = null;
 
+						// 根据该结果来判断是否要将数据下发
 						if (u != null && u) {
 							a.onNext(t);
 							e++;
@@ -356,9 +405,14 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 代表某个数据通过谓语并产生了结果
+		 * @param item
+		 */
 		void innerResult(Boolean item) {
 			innerResult = item;
 			state = STATE_RESULT;
+			// 清除掉当前的inner 对象
 			clearCurrent();
 			drain();
 		}
@@ -404,6 +458,9 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 		}
 	}
 
+	/**
+	 * 该对象用于订阅 谓语产生的结果
+	 */
 	static final class FilterWhenInner implements InnerConsumer<Boolean> {
 
 		final FluxFilterWhenSubscriber<?> parent;
@@ -433,6 +490,10 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 将谓语生成的结果传播到下游
+		 * @param t
+		 */
 		@Override
 		public void onNext(Boolean t) {
 			if (!done) {
@@ -454,6 +515,9 @@ class FluxFilterWhen<T> extends InternalFluxOperator<T, T> {
 			}
 		}
 
+		/**
+		 * 代表对应的 Pub<Boolean> 数据已经发射完
+		 */
 		@Override
 		public void onComplete() {
 			if (!done) {

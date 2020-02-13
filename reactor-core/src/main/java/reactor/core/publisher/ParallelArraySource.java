@@ -39,7 +39,13 @@ final class ParallelArraySource<T> extends ParallelFlux<T> implements SourceProd
 	public int parallelism() {
 		return sources.length;
 	}
-	
+
+	/**
+	 * 因为 source 和 subscribe 的数量是一样的 这里一一对应 直接进行订阅就好
+	 * @param subscribers the subscribers array to run in parallel, the number of items
+	 * must be equal to the parallelism level of this ParallelFlux
+	 *                    parallelFlux 本身是一个并行对象 当被订阅时可以设置一组订阅者 数量与并行度一致
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T>[] subscribers) {
 		if (!validate(subscribers)) {

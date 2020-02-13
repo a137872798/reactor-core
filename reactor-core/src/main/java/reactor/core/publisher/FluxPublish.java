@@ -47,6 +47,7 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 
 	/**
 	 * The source observable.
+	 * 代表上层数据源
 	 */
 	final Flux<? extends T> source;
 
@@ -57,6 +58,9 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 
 	final Supplier<? extends Queue<T>> queueSupplier;
 
+	/**
+	 * 当下游满足多个订阅者时 订阅者会被包装成一个 connection 对象
+	 */
 	volatile PublishSubscriber<T> connection;
 	@SuppressWarnings("rawtypes")
 	static final AtomicReferenceFieldUpdater<FluxPublish, PublishSubscriber> CONNECTION =
@@ -75,6 +79,10 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 		this.queueSupplier = Objects.requireNonNull(queueSupplier, "queueSupplier");
 	}
 
+	/**
+	 * 当订阅者满足数量时 通过连接对象 向上游拉取数据
+	 * @param cancelSupport the callback is called with a Disposable instance that can
+	 */
 	@Override
 	public void connect(Consumer<? super Disposable> cancelSupport) {
 		boolean doConnect;
@@ -91,25 +99,33 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 				s = u;
 			}
 
+			// 该方法就是修改一个 connected 标识 避免重复订阅上游数据
 			doConnect = s.tryConnect();
 			break;
 		}
 
 		cancelSupport.accept(s);
 		if (doConnect) {
+			// 开始向上游订阅数据
 			source.subscribe(s);
 		}
 	}
 
+	/**
+	 * 为该对象设置订阅者
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		PublishInner<T> inner = new PublishInner<>(actual);
+		// 先尝试通过 inner 对象拉取数据  这时inner 对象还没有设置parent 所以无法拉取数据
 		actual.onSubscribe(inner);
 		for (; ; ) {
 			if (inner.isCancelled()) {
 				break;
 			}
 
+			// 如果直接对该对象进行订阅是会强制触发数据的下发的(强制创建connect对象)
 			PublishSubscriber<T> c = connection;
 			if (c == null || c.isTerminated()) {
 				PublishSubscriber<T> u = new PublishSubscriber<>(prefetch, this);
@@ -120,6 +136,8 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 				c = u;
 			}
 
+			// 将inner 对象添加到 c 中 这样c下面维护的子对象共享c的数据 而上游只需要发送一次数据到c就可以
+			// 注意这里还没有对 c 发送数据 必须要通过connect 才可以触发对上游数据的拉取动作
 			if (c.add(inner)) {
 				if (inner.isCancelled()) {
 					c.remove(inner);
@@ -147,11 +165,18 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 		return null;
 	}
 
+	/**
+	 * 连接对象
+	 * @param <T>
+	 */
 	static final class PublishSubscriber<T>
 			implements InnerConsumer<T>, Disposable {
 
 		final int prefetch;
 
+		/**
+		 * 对应的父对象
+		 */
 		final FluxPublish<T> parent;
 
 		volatile Subscription s;
@@ -161,6 +186,9 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 						Subscription.class,
 						"s");
 
+		/**
+		 * 维护下游的转发对象
+		 */
 		volatile PubSubInner<T>[] subscribers;
 
 		@SuppressWarnings("rawtypes")
@@ -242,6 +270,10 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 			}
 		}
 
+		/**
+		 * 当上游接收到数据时  应该就是做暂存之类的
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {
@@ -264,6 +296,7 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 				}
 				done = true;
 			}
+			// 将数据下发到子对象
 			drain();
 		}
 
@@ -318,6 +351,11 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 			}
 		}
 
+		/**
+		 * 添加一个转发对象
+		 * @param inner
+		 * @return
+		 */
 		boolean add(PublishInner<T> inner) {
 			for (; ; ) {
 				FluxPublish.PubSubInner<T>[] a = subscribers;
@@ -381,6 +419,9 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 			return connected == 0 && CONNECTED.compareAndSet(this, 0, 1);
 		}
 
+		/**
+		 * 将 connect 对象的数据下发到子对象
+		 */
 		final void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
 				return;
@@ -408,6 +449,7 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 					int len = a.length;
 					int cancel = 0;
 
+					// 查看每个子对象是否有 requested 如果有就下发数据
 					for (PubSubInner<T> inner : a) {
 						long r = inner.requested;
 						if (r >= 0L) {
@@ -418,6 +460,7 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 						}
 					}
 
+					// 代表所有子对象都被关闭了
 					if (len == cancel) {
 						T v;
 
@@ -472,6 +515,7 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 							break;
 						}
 
+						// 将数据发往每个子对象
 						for (PubSubInner<T> inner : a) {
 							inner.actual.onNext(v);
 							if(Operators.producedCancellable(PubSubInner.REQUESTED,
@@ -484,6 +528,7 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 						e++;
 					}
 
+					// 消费多少拉取多少
 					if (e != 0 && sourceMode != Fuseable.SYNC) {
 						s.request(e);
 					}
@@ -563,8 +608,15 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 
 	}
 
+	/**
+	 * 转发对象
+	 * @param <T>
+	 */
 	static abstract class PubSubInner<T> implements InnerProducer<T> {
 
+		/**
+		 * 连接底层的订阅者
+		 */
 		final CoreSubscriber<? super T> actual;
 
 		volatile long requested;
@@ -576,6 +628,10 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 			this.actual = actual;
 		}
 
+		/**
+		 * 当下游申请数据时
+		 * @param n
+		 */
 		@Override
 		public final void request(long n) {
 			if (Operators.validate(n)) {
@@ -590,6 +646,7 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 			if (r != Long.MIN_VALUE) {
 				r = REQUESTED.getAndSet(this, Long.MIN_VALUE);
 				if (r != Long.MIN_VALUE) {
+					// 移除 parent
 					removeAndDrainParent();
 				}
 			}
@@ -617,13 +674,24 @@ final class FluxPublish<T> extends ConnectableFlux<T> implements Scannable {
 		abstract void removeAndDrainParent();
 	}
 
+	/**
+	 * 订阅者包装对象
+	 * @param <T>
+	 */
 	static final class PublishInner<T> extends PubSubInner<T> {
+
+		/**
+		 * 初始状态 parent 还没有设置
+		 */
 		PublishSubscriber<T> parent;
 
 		PublishInner(CoreSubscriber<? super T> actual) {
 			super(actual);
 		}
 
+		/**
+		 * 当下游申请数据时 会尝试从父对象拉取
+		 */
 		@Override
 		void drainParent() {
 			PublishSubscriber<T> p = parent;

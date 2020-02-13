@@ -20,10 +20,23 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.stream.Stream;
 
+/**
+ * ContextX  类 都使用final 修饰 确保不会被用户篡改
+ */
 final class Context0 implements CoreContext {
 
+	/**
+	 * Context0 内部本身不存在任何键值对
+	 */
 	static final Context0 INSTANCE = new Context0();
 
+	/**
+	 * 当往context 存入key/value 后 就会进行升级
+	 * @param key the key to add/update in the new {@link Context}
+	 * @param value the value to associate to the key in the new {@link Context}
+	 *
+	 * @return
+	 */
 	@Override
 	public Context put(Object key, Object value) {
 		Objects.requireNonNull(key, "key");
@@ -65,6 +78,8 @@ final class Context0 implements CoreContext {
 	public Stream<Map.Entry<Object, Object>> stream() {
 		return Stream.empty();
 	}
+
+	// 由于该对象本身为空 所以 put 实际上没有添加任何元素
 
 	@Override
 	public Context putAllInto(Context base) {

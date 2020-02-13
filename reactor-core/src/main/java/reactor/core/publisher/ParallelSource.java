@@ -36,8 +36,14 @@ import reactor.util.context.Context;
  * ready to consume elements. A value from upstream is sent to only one of the subscribers.
  *
  * @param <T> the value type
+ *           并行 flux
+ *           实际上本对象并没有借助多线程  而是以轮询的方式 挨个往下游每个订阅者发送数据
  */
 final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
+
+	/**
+	 * 数据源
+	 */
 	final Publisher<? extends T> source;
 	
 	final int parallelism;
@@ -78,6 +84,13 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 		return null;
 	}
 
+
+	/**
+	 * 为该对象设置订阅者     注意并行流对象会设置一个订阅者数据 而且数量跟并行度一致
+	 * @param subscribers the subscribers array to run in parallel, the number of items
+	 *                    也就是 每次为并行流设置订阅者时  总是一个 跟并行度相同的数组
+	 *
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T>[] subscribers) {
 		if (!validate(subscribers)) {
@@ -86,13 +99,27 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 		
 		source.subscribe(new ParallelSourceMain<>(subscribers, prefetch, queueSupplier));
 	}
-	
+
+
+	/**
+	 * 包装订阅者对象  内部可以包含多个订阅者
+	 * @param <T>
+	 */
 	static final class ParallelSourceMain<T> implements InnerConsumer<T> {
 
+		/**
+		 * 一组订阅者对象
+		 */
 		final CoreSubscriber<? super T>[] subscribers;
-		
+
+		/**
+		 * 对应 subscribers 的request 数量
+		 */
 		final AtomicLongArray requests;
 
+		/**
+		 * 为每个 subscribers 发射的数量
+		 */
 		final long[] emissions;
 
 		final int prefetch;
@@ -164,6 +191,10 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 			return subscribers[0].currentContext();
 		}
 
+		/**
+		 * 先触发该方法 将上游数据与本对象 整合成 onSubscribe
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
@@ -196,13 +227,18 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 				}
 				
 				queue = queueSupplier.get();
-				
+
+				// 为订阅者生成对应的inner 对象  并向本对象拉取数据 (触发drain())
 				setupSubscribers();
-				
+
+				// 向上游拉取数据
 				s.request(Operators.unboundedOrPrefetch(prefetch));
 			}
 		}
-		
+
+		/**
+		 * 设置订阅者
+		 */
 		void setupSubscribers() {
 			int m = subscribers.length;
 			
@@ -212,24 +248,32 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 				}
 				int j = i;
 
+				// 记录当前订阅者数量
 				SUBSCRIBER_COUNT.lazySet(this, i + 1);
-				
+
+				// 每个订阅者 单独订阅一个inner 对象  这样上游数据 会转发到inner 之后通过inner 转发到下游
 				subscribers[i].onSubscribe(new ParallelSourceInner<>(this, j, m));
 			}
 		}
 
+		/**
+		 * 代表上游将数据下发
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {
 				Operators.onNextDropped(t, currentContext());
 				return;
 			}
+			// 将数据存储到 queue 中
 			if (sourceMode == Fuseable.NONE) {
 				if (!queue.offer(t)) {
 					onError(Operators.onOperatorError(s, Exceptions.failWithOverflow(Exceptions.BACKPRESSURE_ERROR_QUEUE_FULL), t, currentContext()));
 					return;
 				}
 			}
+			// 将数据转发到inner 中
 			drain();
 		}
 
@@ -272,6 +316,7 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 			AtomicLongArray r = this.requests;
 			long[] e = this.emissions;
 			int n = e.length;
+			// 代表当前正在处理的 订阅者
 			int idx = index;
 			int consumed = produced;
 			
@@ -298,7 +343,8 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 					}
 
 					boolean empty = q.isEmpty();
-					
+
+					// 这里队列中没有元素不会提前退出
 					if (d && empty) {
 						for (Subscriber<? super T> s : a) {
 							s.onComplete();
@@ -309,7 +355,8 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 					if (empty) {
 						break;
 					}
-					
+
+					// 如果没有切换线程(单线程运行这个模板 看上去就像是轮询往下游发送数据)
 					long ridx = r.get(idx);
 					long eidx = e[idx];
 					if (ridx != eidx) {
@@ -343,7 +390,8 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 					} else {
 						notReady++;
 					}
-					
+
+					// 每次接收一个元素后 自动将数据发往下一个订阅者
 					idx++;
 					if (idx == n) {
 						idx = 0;
@@ -367,7 +415,10 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 				}
 			}
 		}
-		
+
+		/**
+		 * 代表同步模式下转发
+		 */
 		void drainSync() {
 			int missed = 1;
 			
@@ -387,7 +438,8 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 						q.clear();
 						return;
 					}
-					
+
+					// 在同步模式下 只要上游没有准备好数据 这里就直接触发 onComplete
 					if (q.isEmpty()) {
 						for (Subscriber<? super T> s : a) {
 							s.onComplete();
@@ -395,13 +447,17 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 						return;
 					}
 
+					// 这里要开始将数据发往下游了
 					long ridx = r.get(idx);
 					long eidx = e[idx];
+					// 代表request > emission
+
 					if (ridx != eidx) {
 
 						T v;
 						
 						try {
+							// 从队列中拉出数据
 							v = q.poll();
 						} catch (Throwable ex) {
 							ex = Operators.onOperatorError(s, ex, a[idx].currentContext());
@@ -449,7 +505,10 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 				}
 			}
 		}
-		
+
+		/**
+		 * 将上游数据转发到下游
+		 */
 		void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
 				return;
@@ -458,15 +517,26 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 			if (sourceMode == Fuseable.SYNC) {
 				drainSync();
 			} else {
+				// 默认情况应该是这个
 				drainAsync();
 			}
 		}
 
+		/**
+		 * 根据下标和总数来生成 inner 对象 负责往 subscribe 发送数据
+		 * @param <T>
+		 */
 		static final class ParallelSourceInner<T> implements InnerProducer<T> {
 
 			final ParallelSourceMain<T> parent;
 
+			/**
+			 * 代表是 parent 的第几个订阅者
+			 */
 			final int index;
+			/**
+			 * 总共有多少订阅者
+			 */
 			final int length;
 
 			ParallelSourceInner(ParallelSourceMain<T> parent, int index, int length) {
@@ -488,11 +558,16 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 				return InnerProducer.super.scanUnsafe(key);
 			}
 
+			/**
+			 * 当下游 实际的订阅者向本对象拉取数据时
+			 * @param n
+			 */
 			@Override
 			public void request(long n) {
 				if (Operators.validate(n)) {
 					AtomicLongArray ra = parent.requests;
 					for (;;) {
+						// 找到对应的 request slot 并增加值
 						long r = ra.get(index);
 						if (r == Long.MAX_VALUE) {
 							return;
@@ -502,6 +577,7 @@ final class ParallelSource<T> extends ParallelFlux<T> implements Scannable {
 							break;
 						}
 					}
+					// 代表所有 inner 对象都生成后 让上游发派数据
 					if (parent.subscriberCount == length) {
 						parent.drain();
 					}

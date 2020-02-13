@@ -27,11 +27,18 @@ import reactor.util.annotation.Nullable;
 
 /**
  * A runnable task for {@link Scheduler} Workers that can run periodically
+ * 代表周期性任务
  **/
 final class InstantPeriodicWorkerTask implements Disposable, Callable<Void> {
 
+	/**
+	 * 任务内部的逻辑
+	 */
 	final Runnable task;
 
+	/**
+	 * 执行该任务的线程池
+	 */
 	final ExecutorService executor;
 
 	static final Composite DISPOSED = new EmptyCompositeDisposable();
@@ -82,6 +89,10 @@ final class InstantPeriodicWorkerTask implements Disposable, Callable<Void> {
 		return null;
 	}
 
+	/**
+	 * 更新rest 字段
+	 * @param f
+	 */
 	void setRest(Future<?> f) {
 		for (;;) {
 			Future o = rest;
@@ -95,6 +106,10 @@ final class InstantPeriodicWorkerTask implements Disposable, Callable<Void> {
 		}
 	}
 
+	/**
+	 * 更新first 字段
+	 * @param f
+	 */
 	void setFirst(Future<?> f) {
 		for (;;) {
 			Future o = first;
@@ -113,6 +128,9 @@ final class InstantPeriodicWorkerTask implements Disposable, Callable<Void> {
 		return rest == CANCELLED;
 	}
 
+	/**
+	 * 将内部的3个核心字段 first rest parent 都置成无效字段
+	 */
 	@Override
 	public void dispose() {
 		for (;;) {

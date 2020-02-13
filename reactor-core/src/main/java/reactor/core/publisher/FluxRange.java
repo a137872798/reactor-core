@@ -26,346 +26,356 @@ import reactor.util.annotation.Nullable;
  * Emits a range of integer values.
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象范围内的数据会传播到下游
  */
 final class FluxRange extends Flux<Integer>
-		implements Fuseable, SourceProducer<Integer> {
-
-	final long start;
-
-	final long end;
-
-	FluxRange(int start, int count) {
-		if (count < 0) {
-			throw new IllegalArgumentException("count >= required but it was " + count);
-		}
-		long e = (long) start + count;
-		if (e - 1 > Integer.MAX_VALUE) {
-			throw new IllegalArgumentException("start + count must be less than Integer.MAX_VALUE + 1");
-		}
-
-		this.start = start;
-		this.end = e;
-	}
-
-	@Override
-	@SuppressWarnings("unchecked")
-	public void subscribe(CoreSubscriber<? super Integer> actual) {
-		long st = start;
-		long en = end;
-		if (st == en) {
-			Operators.complete(actual);
-			return;
-		} else
-		if (st + 1 == en) {
-			actual.onSubscribe(Operators.scalarSubscription(actual, (int)st));
-			return;
-		}
-		
-		if (actual instanceof ConditionalSubscriber) {
-			actual.onSubscribe(new RangeSubscriptionConditional((ConditionalSubscriber<? super Integer>) actual, st, en));
-			return;
-		}
-		actual.onSubscribe(new RangeSubscription(actual, st, en));
-	}
-
-	@Override
-	public Object scanUnsafe(Attr key) {
-		return null; //no particular key to be represented, still useful in hooks
-	}
-
-	static final class RangeSubscription implements InnerProducer<Integer>,
-	                                                SynchronousSubscription<Integer> {
-
-		final CoreSubscriber<? super Integer> actual;
-
-		final long end;
-
-		volatile boolean cancelled;
-
-		long index;
-
-		volatile long requested;
-		static final AtomicLongFieldUpdater<RangeSubscription> REQUESTED =
-		  AtomicLongFieldUpdater.newUpdater(RangeSubscription.class, "requested");
-
-		RangeSubscription(CoreSubscriber<? super Integer> actual, long start, long end) {
-			this.actual = actual;
-			this.index = start;
-			this.end = end;
-		}
-
-		@Override
-		public CoreSubscriber<? super Integer> actual() {
-			return actual;
-		}
-
-		@Override
-		public void request(long n) {
-			if (Operators.validate(n)) {
-				if (Operators.addCap(REQUESTED, this, n) == 0) {
-					if (n == Long.MAX_VALUE) {
-						fastPath();
-					} else {
-						slowPath(n);
-					}
-				}
-			}
-		}
-
-		@Override
-		public void cancel() {
-			cancelled = true;
-		}
-
-		void fastPath() {
-			final long e = end;
-			final Subscriber<? super Integer> a = actual;
-
-			for (long i = index; i != e; i++) {
-				if (cancelled) {
-					return;
-				}
-
-				a.onNext((int) i);
-			}
-
-			if (cancelled) {
-				return;
-			}
-
-			a.onComplete();
-		}
-
-		void slowPath(long n) {
-			final Subscriber<? super Integer> a = actual;
-
-			long f = end;
-			long e = 0;
-			long i = index;
-
-			for (; ; ) {
-
-				if (cancelled) {
-					return;
-				}
-
-				while (e != n && i != f) {
-
-					a.onNext((int) i);
-
-					if (cancelled) {
-						return;
-					}
-
-					e++;
-					i++;
-				}
-
-				if (cancelled) {
-					return;
-				}
-
-				if (i == f) {
-					a.onComplete();
-					return;
-				}
-
-				n = requested;
-				if (n == e) {
-					index = i;
-					n = REQUESTED.addAndGet(this, -e);
-					if (n == 0) {
-						return;
-					}
-					e = 0;
-				}
-			}
-		}
-
-		@Override
-		@Nullable
-		public Object scanUnsafe(Attr key) {
-			if (key == Attr.CANCELLED) return cancelled;
-			if (key == Attr.REQUESTED_FROM_DOWNSTREAM) return requested;
-			if (key == Attr.TERMINATED) return isEmpty();
-
-			return InnerProducer.super.scanUnsafe(key);
-		}
-
-		@Override
-		@Nullable
-		public Integer poll() {
-			long i = index;
-			if (i == end) {
-				return null;
-			}
-			index = i + 1;
-			return (int)i;
-		}
-
-		@Override
-		public boolean isEmpty() {
-			return index == end;
-		}
-
-		@Override
-		public void clear() {
-			index = end;
-		}
-		
-		@Override
-		public int size() {
-			return (int)(end - index);
-		}
-	}
-	
-	static final class RangeSubscriptionConditional
-			implements InnerProducer<Integer>,
-			           SynchronousSubscription<Integer> {
-
-		final ConditionalSubscriber<? super Integer> actual;
-
-		final long end;
-
-		volatile boolean cancelled;
-
-		long index;
-
-		volatile long requested;
-		static final AtomicLongFieldUpdater<RangeSubscriptionConditional> REQUESTED =
-				AtomicLongFieldUpdater.newUpdater(RangeSubscriptionConditional.class, "requested");
-
-		RangeSubscriptionConditional(ConditionalSubscriber<? super Integer> actual,
-				long start,
-				long end) {
-			this.actual = actual;
-			this.index = start;
-			this.end = end;
-		}
-
-		@Override
-		public CoreSubscriber<? super Integer> actual() {
-			return actual;
-		}
-
-		@Override
-		public void request(long n) {
-			if (Operators.validate(n)) {
-				if (Operators.addCap(REQUESTED, this, n) == 0) {
-					if (n == Long.MAX_VALUE) {
-						fastPath();
-					} else {
-						slowPath(n);
-					}
-				}
-			}
-		}
-
-		@Override
-		public void cancel() {
-			cancelled = true;
-		}
-
-		void fastPath() {
-			final long e = end;
-			final ConditionalSubscriber<? super Integer> a = actual;
-
-			for (long i = index; i != e; i++) {
-				if (cancelled) {
-					return;
-				}
-
-				a.tryOnNext((int) i);
-			}
-
-			if (cancelled) {
-				return;
-			}
-
-			a.onComplete();
-		}
-
-		void slowPath(long n) {
-			final ConditionalSubscriber<? super Integer> a = actual;
-
-			long f = end;
-			long e = 0;
-			long i = index;
-
-			for (; ; ) {
-
-				if (cancelled) {
-					return;
-				}
-
-				while (e != n && i != f) {
-
-					boolean b = a.tryOnNext((int) i);
-
-					if (cancelled) {
-						return;
-					}
-
-					if (b) {
-						e++;
-					}
-					i++;
-				}
-
-				if (cancelled) {
-					return;
-				}
-
-				if (i == f) {
-					a.onComplete();
-					return;
-				}
-
-				n = requested;
-				if (n == e) {
-					index = i;
-					n = REQUESTED.addAndGet(this, -e);
-					if (n == 0) {
-						return;
-					}
-					e = 0;
-				}
-			}
-		}
-
-		@Override
-		public Object scanUnsafe(Attr key) {
-			if (key == Attr.CANCELLED) return cancelled;
-			if (key == Attr.REQUESTED_FROM_DOWNSTREAM) return requested;
-			if (key == Attr.TERMINATED) return isEmpty();
-
-			return InnerProducer.super.scanUnsafe(key);
-		}
-
-		@Override
-		@Nullable
-		public Integer poll() {
-			long i = index;
-			if (i == end) {
-				return null;
-			}
-			index = i + 1;
-			return (int)i;
-		}
-
-		@Override
-		public boolean isEmpty() {
-			return index == end;
-		}
-
-		@Override
-		public void clear() {
-			index = end;
-		}
-
-		@Override
-		public int size() {
-			return (int)(end - index);
-		}
-	}
+        implements Fuseable, SourceProducer<Integer> {
+
+    final long start;
+
+    final long end;
+
+    FluxRange(int start, int count) {
+        if (count < 0) {
+            throw new IllegalArgumentException("count >= required but it was " + count);
+        }
+        long e = (long) start + count;
+        if (e - 1 > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("start + count must be less than Integer.MAX_VALUE + 1");
+        }
+
+        this.start = start;
+        this.end = e;
+    }
+
+    /**
+     * 为该对象设置订阅者
+     *
+     * @param actual the {@link Subscriber} interested into the published sequence
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public void subscribe(CoreSubscriber<? super Integer> actual) {
+        long st = start;
+        long en = end;
+        // 代表范围内无数据
+        if (st == en) {
+            Operators.complete(actual);
+            return;
+            //代表该对象只有一个元素
+        } else if (st + 1 == en) {
+            actual.onSubscribe(Operators.scalarSubscription(actual, (int) st));
+            return;
+        }
+
+        if (actual instanceof ConditionalSubscriber) {
+            actual.onSubscribe(new RangeSubscriptionConditional((ConditionalSubscriber<? super Integer>) actual, st, en));
+            return;
+        }
+        actual.onSubscribe(new RangeSubscription(actual, st, en));
+    }
+
+    @Override
+    public Object scanUnsafe(Attr key) {
+        return null; //no particular key to be represented, still useful in hooks
+    }
+
+    /**
+     * 该对象会挨个将 范围内的数据传播下去
+     */
+    static final class RangeSubscription implements InnerProducer<Integer>,
+            SynchronousSubscription<Integer> {
+
+        final CoreSubscriber<? super Integer> actual;
+
+        final long end;
+
+        volatile boolean cancelled;
+
+        long index;
+
+        volatile long requested;
+        static final AtomicLongFieldUpdater<RangeSubscription> REQUESTED =
+                AtomicLongFieldUpdater.newUpdater(RangeSubscription.class, "requested");
+
+        RangeSubscription(CoreSubscriber<? super Integer> actual, long start, long end) {
+            this.actual = actual;
+            this.index = start;
+            this.end = end;
+        }
+
+        @Override
+        public CoreSubscriber<? super Integer> actual() {
+            return actual;
+        }
+
+        @Override
+        public void request(long n) {
+            if (Operators.validate(n)) {
+                if (Operators.addCap(REQUESTED, this, n) == 0) {
+                    if (n == Long.MAX_VALUE) {
+                        fastPath();
+                    } else {
+                        slowPath(n);
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void cancel() {
+            cancelled = true;
+        }
+
+        void fastPath() {
+            final long e = end;
+            final Subscriber<? super Integer> a = actual;
+
+            for (long i = index; i != e; i++) {
+                if (cancelled) {
+                    return;
+                }
+
+                a.onNext((int) i);
+            }
+
+            if (cancelled) {
+                return;
+            }
+
+            a.onComplete();
+        }
+
+        void slowPath(long n) {
+            final Subscriber<? super Integer> a = actual;
+
+            long f = end;
+            long e = 0;
+            long i = index;
+
+            for (; ; ) {
+
+                if (cancelled) {
+                    return;
+                }
+
+                while (e != n && i != f) {
+
+                    a.onNext((int) i);
+
+                    if (cancelled) {
+                        return;
+                    }
+
+                    e++;
+                    i++;
+                }
+
+                if (cancelled) {
+                    return;
+                }
+
+                if (i == f) {
+                    a.onComplete();
+                    return;
+                }
+
+                n = requested;
+                if (n == e) {
+                    index = i;
+                    n = REQUESTED.addAndGet(this, -e);
+                    if (n == 0) {
+                        return;
+                    }
+                    e = 0;
+                }
+            }
+        }
+
+        @Override
+        @Nullable
+        public Object scanUnsafe(Attr key) {
+            if (key == Attr.CANCELLED) return cancelled;
+            if (key == Attr.REQUESTED_FROM_DOWNSTREAM) return requested;
+            if (key == Attr.TERMINATED) return isEmpty();
+
+            return InnerProducer.super.scanUnsafe(key);
+        }
+
+        @Override
+        @Nullable
+        public Integer poll() {
+            long i = index;
+            if (i == end) {
+                return null;
+            }
+            index = i + 1;
+            return (int) i;
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return index == end;
+        }
+
+        @Override
+        public void clear() {
+            index = end;
+        }
+
+        @Override
+        public int size() {
+            return (int) (end - index);
+        }
+    }
+
+    static final class RangeSubscriptionConditional
+            implements InnerProducer<Integer>,
+            SynchronousSubscription<Integer> {
+
+        final ConditionalSubscriber<? super Integer> actual;
+
+        final long end;
+
+        volatile boolean cancelled;
+
+        long index;
+
+        volatile long requested;
+        static final AtomicLongFieldUpdater<RangeSubscriptionConditional> REQUESTED =
+                AtomicLongFieldUpdater.newUpdater(RangeSubscriptionConditional.class, "requested");
+
+        RangeSubscriptionConditional(ConditionalSubscriber<? super Integer> actual,
+                                     long start,
+                                     long end) {
+            this.actual = actual;
+            this.index = start;
+            this.end = end;
+        }
+
+        @Override
+        public CoreSubscriber<? super Integer> actual() {
+            return actual;
+        }
+
+        @Override
+        public void request(long n) {
+            if (Operators.validate(n)) {
+                if (Operators.addCap(REQUESTED, this, n) == 0) {
+                    if (n == Long.MAX_VALUE) {
+                        fastPath();
+                    } else {
+                        slowPath(n);
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void cancel() {
+            cancelled = true;
+        }
+
+        void fastPath() {
+            final long e = end;
+            final ConditionalSubscriber<? super Integer> a = actual;
+
+            for (long i = index; i != e; i++) {
+                if (cancelled) {
+                    return;
+                }
+
+                a.tryOnNext((int) i);
+            }
+
+            if (cancelled) {
+                return;
+            }
+
+            a.onComplete();
+        }
+
+        void slowPath(long n) {
+            final ConditionalSubscriber<? super Integer> a = actual;
+
+            long f = end;
+            long e = 0;
+            long i = index;
+
+            for (; ; ) {
+
+                if (cancelled) {
+                    return;
+                }
+
+                while (e != n && i != f) {
+
+                    boolean b = a.tryOnNext((int) i);
+
+                    if (cancelled) {
+                        return;
+                    }
+
+                    if (b) {
+                        e++;
+                    }
+                    i++;
+                }
+
+                if (cancelled) {
+                    return;
+                }
+
+                if (i == f) {
+                    a.onComplete();
+                    return;
+                }
+
+                n = requested;
+                if (n == e) {
+                    index = i;
+                    n = REQUESTED.addAndGet(this, -e);
+                    if (n == 0) {
+                        return;
+                    }
+                    e = 0;
+                }
+            }
+        }
+
+        @Override
+        public Object scanUnsafe(Attr key) {
+            if (key == Attr.CANCELLED) return cancelled;
+            if (key == Attr.REQUESTED_FROM_DOWNSTREAM) return requested;
+            if (key == Attr.TERMINATED) return isEmpty();
+
+            return InnerProducer.super.scanUnsafe(key);
+        }
+
+        @Override
+        @Nullable
+        public Integer poll() {
+            long i = index;
+            if (i == end) {
+                return null;
+            }
+            index = i + 1;
+            return (int) i;
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return index == end;
+        }
+
+        @Override
+        public void clear() {
+            index = end;
+        }
+
+        @Override
+        public int size() {
+            return (int) (end - index);
+        }
+    }
 }

@@ -35,6 +35,8 @@ import reactor.core.Scannable;
  *
  * @author Stephane Maldini
  * @author Simon Baslé
+ * 并行调度器  意思就是往该对象提交任务 会均衡的分配给 各个jdk线程池
+ * 而弹性线程池是按需分配 使用会自动回收
  */
 final class ParallelScheduler implements Scheduler, Supplier<ScheduledExecutorService>,
                                          Scannable {
@@ -46,11 +48,18 @@ final class ParallelScheduler implements Scheduler, Supplier<ScheduledExecutorSe
     final ThreadFactory factory;
 
     volatile ScheduledExecutorService[] executors;
+
+    /**
+     * 维护全局范围的  调度器 与 定时线程池
+     */
     static final AtomicReferenceFieldUpdater<ParallelScheduler, ScheduledExecutorService[]> EXECUTORS =
             AtomicReferenceFieldUpdater.newUpdater(ParallelScheduler.class, ScheduledExecutorService[].class, "executors");
 
+    /**
+     * 每个被关闭的调度器 内部的线程池会指向该对象
+     */
     static final ScheduledExecutorService[] SHUTDOWN = new ScheduledExecutorService[0];
-    
+
     static final ScheduledExecutorService TERMINATED;
     static {
         TERMINATED = Executors.newSingleThreadScheduledExecutor();
@@ -59,6 +68,11 @@ final class ParallelScheduler implements Scheduler, Supplier<ScheduledExecutorSe
 
     int roundRobin;
 
+    /**
+     * 通过并行度 和一个线程池工厂来创建调度器对象
+     * @param n
+     * @param factory
+     */
     ParallelScheduler(int n, ThreadFactory factory) {
         if (n <= 0) {
             throw new IllegalArgumentException("n > 0 required but it was " + n);
@@ -71,6 +85,7 @@ final class ParallelScheduler implements Scheduler, Supplier<ScheduledExecutorSe
     /**
      * Instantiates the default {@link ScheduledExecutorService} for the ParallelScheduler
      * ({@code Executors.newScheduledThreadPoolExecutor} with core and max pool size of 1).
+     * 调度器内每个定时器对象 都是单线程的
      */
     @Override
     public ScheduledExecutorService get() {
@@ -79,7 +94,11 @@ final class ParallelScheduler implements Scheduler, Supplier<ScheduledExecutorSe
         poolExecutor.setRemoveOnCancelPolicy(true);
         return poolExecutor;
     }
-    
+
+    /**
+     * 调度器在初始化时 使用线程工厂来填充线程数组
+     * @param n
+     */
     void init(int n) {
         ScheduledExecutorService[] a = new ScheduledExecutorService[n];
         for (int i = 0; i < n; i++) {
@@ -132,7 +151,11 @@ final class ParallelScheduler implements Scheduler, Supplier<ScheduledExecutorSe
             }
         }
     }
-    
+
+    /**
+     * 从调度器中返回一个定时器对象
+     * @return
+     */
     ScheduledExecutorService pick() {
         ScheduledExecutorService[] a = executors;
         if (a != SHUTDOWN) {
@@ -149,6 +172,12 @@ final class ParallelScheduler implements Scheduler, Supplier<ScheduledExecutorSe
         return TERMINATED;
     }
 
+    /**
+     * 执行任务
+     * @param task the task to execute
+     *
+     * @return
+     */
     @Override
     public Disposable schedule(Runnable task) {
 	    return Schedulers.directSchedule(pick(), task, null, 0L, TimeUnit.MILLISECONDS);
@@ -159,6 +188,14 @@ final class ParallelScheduler implements Scheduler, Supplier<ScheduledExecutorSe
 	    return Schedulers.directSchedule(pick(), task, null, delay, unit);
     }
 
+    /**
+     * 周期性执行某个任务
+     * @param task the task to schedule
+     * @param initialDelay the initial delay amount, non-positive values indicate non-delayed scheduling
+     * @param period the period at which the task should be re-executed
+     * @param unit the unit of measure of the delay amount
+     * @return
+     */
     @Override
     public Disposable schedulePeriodically(Runnable task,
             long initialDelay,
@@ -197,6 +234,10 @@ final class ParallelScheduler implements Scheduler, Supplier<ScheduledExecutorSe
                 .map(exec -> key -> Schedulers.scanExecutor(exec, key));
     }
 
+    /**
+     * 创建一个 worker 对象 该对象也具备执行任务 和 执行定时任务 的功能
+     * @return
+     */
     @Override
     public Worker createWorker() {
         return new ExecutorServiceWorker(pick());

@@ -30,11 +30,13 @@ import reactor.util.context.Context;
  * next signals followed by zero or one onError/onComplete.
  * <p>
  * @param <T> the value type
+ *           下沉对象
  */
 public interface FluxSink<T> {
 
 	/**
      * @see Subscriber#onComplete()
+	 * 代表某个数据流处理完成了
      */
     void complete();
 
@@ -46,12 +48,14 @@ public interface FluxSink<T> {
 	 *   {@link CoreSubscriber#currentContext()}
 	 *
 	 * @return the current subscriber {@link Context}.
+	 * 获取本次处理中的上下文对象
 	 */
 	Context currentContext();
 
     /**
      * @see Subscriber#onError(Throwable)
      * @param e the exception to signal, not null
+	 *          代表在处理过程中遇到了某种异常
      */
     void error(Throwable e);
 
@@ -59,18 +63,21 @@ public interface FluxSink<T> {
      * Try emitting, might throw an unchecked exception.
      * @see Subscriber#onNext(Object)
      * @param t the value to emit, not null
+	 *
      */
     FluxSink<T> next(T t);
 
 	/**
 	 * The current outstanding request amount.
 	 * @return the current outstanding request amount
+	 * 获取请求数据量
 	 */
 	long requestedFromDownstream();
 
 	/**
 	 * Returns true if the downstream cancelled the sequence.
 	 * @return true if the downstream cancelled the sequence
+	 * 当前流是否被关闭
 	 */
 	boolean isCancelled();
 
@@ -125,20 +132,24 @@ public interface FluxSink<T> {
 
 	/**
 	 * Enumeration for backpressure handling.
+	 * 当背压超过负载时采用的策略
 	 */
 	enum OverflowStrategy {
 		/**
 		 * Completely ignore downstream backpressure requests.
 		 * <p>
 		 * This may yield {@link IllegalStateException} when queues get full downstream.
+		 * 忽略背压警告
 		 */
 		IGNORE,
 		/**
 		 * Signal an {@link IllegalStateException} when the downstream can't keep up
+		 * 触发异常
 		 */
 		ERROR,
 		/**
 		 * Drop the incoming signal if the downstream is not ready to receive it.
+		 * 丢弃收到的数据
 		 */
 		DROP,
 		/**
@@ -149,6 +160,7 @@ public interface FluxSink<T> {
 		 * Buffer all signals if the downstream can't keep up.
 		 * <p>
 		 * Warning! This does unbounded buffering and may lead to {@link OutOfMemoryError}.
+		 * 缓存所有数据
 		 */
 		BUFFER
 	}

@@ -20,6 +20,7 @@ package reactor.util.context;
  * Abstract base to optimize interactions between reactor core {@link Context} implementations.
  *
  * @author Simon Baslé
+ * 该接口拓展了 contextN
  */
 interface CoreContext extends Context {
 
@@ -33,14 +34,17 @@ interface CoreContext extends Context {
 	default Context putAll(Context other) {
 		if (other.isEmpty()) return this;
 
+		// 将2个上下文对象内 元素整合起来
 		if (other instanceof CoreContext) {
 			CoreContext coreContext = (CoreContext) other;
 			return coreContext.putAllInto(this);
 		}
 
+		// 首先先将元素全部设置到contextN中
 		ContextN newContext = new ContextN(this.size() + other.size());
 		this.unsafePutAllInto(newContext);
 		other.stream().forEach(newContext);
+		// 之后根据长度来调整上下文
 		if (newContext.size() <= 5) {
 			// make it return Context{1-5}
 			return Context.of(newContext);
@@ -54,6 +58,7 @@ interface CoreContext extends Context {
 	 *
 	 * @param base the {@link Context} in which we're putting all our values
 	 * @return a new context containing all the base values merged with all our values
+	 * 安全的将2个 context 内部的元素整合到一个中
 	 */
 	Context putAllInto(Context base);
 

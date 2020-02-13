@@ -39,11 +39,14 @@ import reactor.util.annotation.Nullable;
  * and lookahead doesn't really matter with small queues.
  *
  * @param <T> the value type
+ *           单生产者 单消费者 队列
  */
 final class SpscLinkedArrayQueue<T> extends AbstractQueue<T>
 		implements BiPredicate<T, T> {
 
 	final int mask;
+
+	// 应该是 consumerIndex <= producerIndex 每次添加新元素时 prod 会增加
 
 	volatile long producerIndex;
 	@SuppressWarnings("rawtypes")
@@ -61,12 +64,22 @@ final class SpscLinkedArrayQueue<T> extends AbstractQueue<T>
 
 	static final Object NEXT = new Object();
 
+	/**
+	 * 根据初始容量
+	 * @param linkSize
+	 */
 	SpscLinkedArrayQueue(int linkSize) {
 		int c = Queues.ceilingNextPowerOfTwo(Math.max(8, linkSize));
+		// 创建原子队列对象
 		this.producerArray = this.consumerArray = new AtomicReferenceArray<>(c + 1);
 		this.mask = c - 1;
 	}
 
+	/**
+	 * 元素添加到队列中
+	 * @param e
+	 * @return
+	 */
 	@Override
 	public boolean offer(T e) {
 		Objects.requireNonNull(e);
@@ -75,8 +88,10 @@ final class SpscLinkedArrayQueue<T> extends AbstractQueue<T>
 		AtomicReferenceArray<Object> a = producerArray;
 		int m = mask;
 
+		// 获取 插入目标偏移量
 		int offset = (int) (pi + 1) & m;
 
+		// 代表对应的下标已经有元素了  代表需要扩容
 		if (a.get(offset) != null) {
 			offset = (int) pi & m;
 
@@ -104,6 +119,7 @@ final class SpscLinkedArrayQueue<T> extends AbstractQueue<T>
 	 * @param second the second value, not null
 	 *
 	 * @return true if the queue accepted the two new values
+	 * 并发的插入2个元素
 	 */
 	@Override
 	public boolean test(T first, T second) {
@@ -138,6 +154,10 @@ final class SpscLinkedArrayQueue<T> extends AbstractQueue<T>
 		return true;
 	}
 
+	/**
+	 * 从数组中 获取元素
+	 * @return
+	 */
 	@SuppressWarnings("unchecked")
 	@Override
 	@Nullable

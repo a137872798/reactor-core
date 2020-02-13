@@ -29,6 +29,7 @@ import reactor.util.context.Context;
 
 /**
  * @author Stephane Maldini
+ * processor 相当于将 pub 和sub 的功能集成在一个对象中
  */
 final class DelegateProcessor<IN, OUT> extends FluxProcessor<IN, OUT> {
 
@@ -48,6 +49,8 @@ final class DelegateProcessor<IN, OUT> extends FluxProcessor<IN, OUT> {
 		}
 		return Context.empty();
 	}
+
+	// 该对象作为订阅者 去订阅其他数据源
 
 	@Override
 	public void onComplete() {
@@ -69,6 +72,10 @@ final class DelegateProcessor<IN, OUT> extends FluxProcessor<IN, OUT> {
 		upstream.onSubscribe(s);
 	}
 
+	/**
+	 * 订阅 processor 内部的数据源
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super OUT> actual) {
 		Objects.requireNonNull(actual, "subscribe");

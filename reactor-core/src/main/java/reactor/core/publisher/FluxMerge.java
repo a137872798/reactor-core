@@ -27,9 +27,14 @@ import reactor.core.CoreSubscriber;
  * Merges a fixed array of Publishers.
  * @param <T> the element type of the publishers
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象 类似于 FluxFlatMap  不过 flat 代表展开 也就是将一个 flux 展开成多个 flux 后 再一起处理
+ * 而 merge 直接将多个 flux 一起处理
  */
 final class FluxMerge<T> extends Flux<T> implements SourceProducer<T> {
 
+	/**
+	 * 上游数据源
+	 */
 	final Publisher<? extends T>[] sources;
 	
 	final boolean delayError;
@@ -59,7 +64,11 @@ final class FluxMerge<T> extends Flux<T> implements SourceProducer<T> {
 		this.mainQueueSupplier = Objects.requireNonNull(mainQueueSupplier, "mainQueueSupplier");
 		this.innerQueueSupplier = Objects.requireNonNull(innerQueueSupplier, "innerQueueSupplier");
 	}
-	
+
+	/**
+	 * 当为该对象设置订阅者时触发
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		FluxFlatMap.FlatMapMain<Publisher<? extends T>, T> merger = new FluxFlatMap.FlatMapMain<>(

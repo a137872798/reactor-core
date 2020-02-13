@@ -41,7 +41,9 @@ import reactor.util.context.Context;
 final class FluxGenerate<T, S>
 extends Flux<T> implements Fuseable, SourceProducer<T> {
 
-
+	/**
+	 * 默认情况 state 的回调会返回null
+	 */
 	static final Callable EMPTY_CALLABLE = () -> null;
 
 	final Callable<S> stateSupplier;
@@ -70,6 +72,10 @@ extends Flux<T> implements Fuseable, SourceProducer<T> {
 		this.stateConsumer = Objects.requireNonNull(stateConsumer, "stateConsumer");
 	}
 
+	/**
+	 * 当为该对象设置订阅者时 触发
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		S state;
@@ -88,6 +94,11 @@ extends Flux<T> implements Fuseable, SourceProducer<T> {
 		return null; //no particular key to be represented, still useful in hooks
 	}
 
+	/**
+	 * 将订阅者与数据源包装
+	 * @param <T>
+	 * @param <S>
+	 */
 	static final class GenerateSubscription<T, S>
 	  implements QueueSubscription<T>, InnerProducer<T>, SynchronousSink<T> {
 

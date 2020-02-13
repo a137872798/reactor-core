@@ -46,6 +46,7 @@ import reactor.util.context.Context;
  * @param <O> the type of the value that will be made available
  *
  * @author Stephane Maldini
+ * 处理器对象
  */
 public final class MonoProcessor<O> extends Mono<O>
 		implements Processor<O, O>, CoreSubscriber<O>, Disposable, Subscription,
@@ -63,7 +64,9 @@ public final class MonoProcessor<O> extends Mono<O>
 		return new MonoProcessor<>(null);
 	}
 
-
+	/**
+	 * 订阅者子对象  只会向下游发射一个数据
+	 */
 	volatile NextInner<O>[] subscribers;
 
 	@SuppressWarnings("rawtypes")
@@ -72,15 +75,26 @@ public final class MonoProcessor<O> extends Mono<O>
 					NextInner[].class,
 					"subscribers");
 
+	// 用于标识几个特殊状态的常量
+
+	/**
+	 * 代表没有source
+	 */
 	@SuppressWarnings("rawtypes")
 	static final NextInner[] EMPTY = new NextInner[0];
 
 	@SuppressWarnings("rawtypes")
 	static final NextInner[] TERMINATED = new NextInner[0];
 
+	/**
+	 * 代表有 source
+	 */
 	@SuppressWarnings("rawtypes")
 	static final NextInner[] EMPTY_WITH_SOURCE = new NextInner[0];
 
+	/**
+	 * 代表上游数据流
+	 */
 	CorePublisher<? extends O> source;
 
 	Throwable    error;
@@ -160,15 +174,20 @@ public final class MonoProcessor<O> extends Mono<O>
 	 *
 	 * @return the value of this {@code MonoProcessor} or {@code null} if the timeout is reached and the {@code MonoProcessor} has
 	 * not completed
+	 * 该对象在接收订阅者时 还不会发射上游数据 必须要触发connect() 才行
 	 */
 	@Override
 	@Nullable
 	public O block(@Nullable Duration timeout) {
 		try {
+			// 已经终止了 也就是已经拉取过一次数据了
 			if (!isPending()) {
+				// 查看当前是否已经有结果了 如果没有返回null 有结果的话直接返回
 				return peek();
 			}
 
+			// 使用该对象时 一般是 .subscribe(x).block() 这样 上游才会发射数据 单独调用subscribe() 实际上只是添加订阅者 而中转对象并不会真正向
+			// 上游拉取数据
 			connect();
 
 			long delay;
@@ -180,6 +199,7 @@ public final class MonoProcessor<O> extends Mono<O>
 			}
 			for (; ; ) {
 				NextInner<O>[] inners = subscribers;
+				// 代表已经产生结果了 如果有 error 触发onError
 				if (inners == TERMINATED) {
 					if (error != null) {
 						RuntimeException re = Exceptions.propagate(error);
@@ -191,11 +211,13 @@ public final class MonoProcessor<O> extends Mono<O>
 					}
 					return value;
 				}
+				// 代表已经超时了
 				if (timeout != null && delay < System.nanoTime()) {
 					cancel();
 					throw new IllegalStateException("Timeout on Mono blocking read");
 				}
 
+				// 这里是不断自旋吗 那不是很占cpu???
 				Thread.sleep(1);
 			}
 
@@ -285,10 +307,15 @@ public final class MonoProcessor<O> extends Mono<O>
 		}
 	}
 
+	/**
+	 * 上游将数据发到中转站
+	 * @param value
+	 */
 	@Override
 	@SuppressWarnings("unchecked")
 	public final void onNext(@Nullable O value) {
 		Subscription s;
+		// 如果上游对象已经被关闭了 丢弃
 		if ((s = UPSTREAM.getAndSet(this, Operators.cancelledSubscription()))
 				== Operators.cancelledSubscription()) {
 			if (value != null) {
@@ -297,12 +324,14 @@ public final class MonoProcessor<O> extends Mono<O>
 			return;
 		}
 
+		// 因为该对象是 mono对象 所以只需要保存一个value 就好
 		this.value = value;
 		Publisher<? extends O> parent = source;
 		source = null;
 
 		NextInner<O>[] array = SUBSCRIBERS.getAndSet(this, TERMINATED);
 
+		// 触发下游所有的onComplete
 		if (value == null) {
 			for (NextInner<O> as : array) {
 				as.onComplete();
@@ -313,6 +342,7 @@ public final class MonoProcessor<O> extends Mono<O>
 				s.cancel();
 			}
 
+			// 触发 onNext(value) 和 onComplete
 			for (NextInner<O> as : array) {
 				as.complete(value);
 			}
@@ -363,10 +393,18 @@ public final class MonoProcessor<O> extends Mono<O>
 		Operators.validate(n);
 	}
 
+	/**
+	 * 为该对象设置订阅者
+	 * 该对象也类似与 publish 就是下游所有对象会共享中转站的数据
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(final CoreSubscriber<? super O> actual) {
+		// 将订阅者包装成 inner 对象
 		NextInner<O> as = new NextInner<>(actual, this);
+		// 触发 as.request
 		actual.onSubscribe(as);
+		// 维护子对象
 		if (add(as)) {
 			if (as.isCancelled()) {
 				remove(as);
@@ -389,6 +427,9 @@ public final class MonoProcessor<O> extends Mono<O>
 		}
 	}
 
+	/**
+	 * 当触发 connect时 上游数据才会发到中转站对象上
+	 */
 	void connect() {
 		Publisher<? extends O> parent = source;
 		if (parent != null && SUBSCRIBERS.compareAndSet(this, EMPTY_WITH_SOURCE, EMPTY)) {
@@ -437,6 +478,11 @@ public final class MonoProcessor<O> extends Mono<O>
 		return downstreamCount() != 0;
 	}
 
+	/**
+	 * 维护子对象
+	 * @param ps
+	 * @return
+	 */
 	boolean add(NextInner<O> ps) {
 		for (;;) {
 			NextInner<O>[] a = subscribers;
@@ -445,6 +491,7 @@ public final class MonoProcessor<O> extends Mono<O>
 				return false;
 			}
 
+			// 简单的扩增数组
 			int n = a.length;
 			@SuppressWarnings("unchecked")
 			NextInner<O>[] b = new NextInner[n + 1];
@@ -461,6 +508,10 @@ public final class MonoProcessor<O> extends Mono<O>
 		}
 	}
 
+	/**
+	 * 移除掉某个 子订阅者
+	 * @param ps
+	 */
 	@SuppressWarnings("unchecked")
 	void remove(NextInner<O> ps) {
 		for (;;) {
@@ -497,7 +548,15 @@ public final class MonoProcessor<O> extends Mono<O>
 		}
 	}
 
+	/**
+	 * 订阅者对象  该对象只有当触发 onComplete 时 才会一次性触发 onNext(value) onComplete()
+	 * @param <T>
+	 */
 	final static class NextInner<T> extends Operators.MonoSubscriber<T, T> {
+
+		/**
+		 * 指明该对象的父对象
+		 */
 		final MonoProcessor<T> parent;
 
 		NextInner(CoreSubscriber<? super T> actual, MonoProcessor<T> parent) {

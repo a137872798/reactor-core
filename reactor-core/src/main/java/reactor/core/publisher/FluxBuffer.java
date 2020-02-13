@@ -36,6 +36,7 @@ import reactor.util.context.Context;
  * @param <C> the buffer collection type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 本对象内部的数据全部转换成 list
  */
 final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxOperator<T, C> {
 
@@ -43,12 +44,28 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 
 	final int skip;
 
+	/**
+	 * 生成 list 的函数
+	 */
 	final Supplier<C> bufferSupplier;
 
+	/**
+	 * source 代表本 flux 的数据来源 (更上游的flux)
+	 * @param source
+	 * @param size
+	 * @param bufferSupplier
+	 */
 	FluxBuffer(Flux<? extends T> source, int size, Supplier<C> bufferSupplier) {
 		this(source, size, size, bufferSupplier);
 	}
 
+	/**
+	 * 默认情况 size == skip
+	 * @param source
+	 * @param size
+	 * @param skip
+	 * @param bufferSupplier
+	 */
 	FluxBuffer(Flux<? extends T> source,
 			int size,
 			int skip,
@@ -67,8 +84,14 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 		this.bufferSupplier = Objects.requireNonNull(bufferSupplier, "bufferSupplier");
 	}
 
+	/**
+	 * 包装订阅者  注意订阅者 只允许接受容器类型 加工后的允许接收 最上游发来的数据
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super C> actual) {
+		// 默认情况 size == skip
 		if (size == skip) {
 			return new BufferExactSubscriber<>(actual, size, bufferSupplier);
 		}
@@ -76,19 +99,35 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 			return new BufferSkipSubscriber<>(actual, size, skip, bufferSupplier);
 		}
 		else {
+			// 代表内部元素会有重叠
 			return new BufferOverlappingSubscriber<>(actual, size, skip, bufferSupplier);
 		}
 	}
 
+	/**
+	 * 该对象代表内部没有跳过数据
+	 * 该对象相当于一个桥梁 一边从最上游的flux 接收数据 一边加工后传播到真正的 subscriber
+	 * @param <T>
+	 * @param <C>
+	 */
 	static final class BufferExactSubscriber<T, C extends Collection<? super T>>
 			implements InnerOperator<T, C> {
 
+		/**
+		 * 实际的订阅者
+		 */
 		final CoreSubscriber<? super C> actual;
 
+		/**
+		 * 生成队列的函数
+		 */
 		final Supplier<C> bufferSupplier;
 
 		final int size;
 
+		/**
+		 * 队列
+		 */
 		C buffer;
 
 		Subscription s;
@@ -106,6 +145,7 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
+				// 从根源拉取数据
 				s.request(Operators.multiplyCap(n, size));
 			}
 		}
@@ -116,15 +156,24 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 			Operators.onDiscardMultiple(buffer, actual.currentContext());
 		}
 
+		/**
+		 * 首先触发该方法
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
 
+				// 触发 本对象的 request
 				actual.onSubscribe(this);
 			}
 		}
 
+		/**
+		 * 从根源接收数据
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {
@@ -149,6 +198,7 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 
 			b.add(t);
 
+			// 当传递部分数据时 如果容器先满了 将容器先传递到下游
 			if (b.size() == size) {
 				buffer = null;
 				actual.onNext(b);
@@ -166,6 +216,9 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 			Operators.onDiscardMultiple(buffer, actual.currentContext());
 		}
 
+		/**
+		 * 代表已经接收完全部的数据  并将容器传播到下游
+		 */
 		@Override
 		public void onComplete() {
 			if (done) {
@@ -202,9 +255,17 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 		}
 	}
 
+	/**
+	 * 代表需要跳过一些元素
+	 * @param <T>
+	 * @param <C>
+	 */
 	static final class BufferSkipSubscriber<T, C extends Collection<? super T>>
 			implements InnerOperator<T, C> {
 
+		/**
+		 * 最下游的订阅者
+		 */
 		final CoreSubscriber<? super C> actual;
 		final Context ctx;
 
@@ -238,6 +299,10 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 			this.bufferSupplier = bufferSupplier;
 		}
 
+		/**
+		 * 下游对象 向本对象拉取数据 间接触发 本对象向最上游对象拉取数据
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (!Operators.validate(n)) {
@@ -273,6 +338,10 @@ final class FluxBuffer<T, C extends Collection<? super T>> extends InternalFluxO
 			}
 		}
 
+		/**
+		 * 最上游 将数据传播下游
+		 * @param t
+		 */
 		@Override
 		public void onNext(T t) {
 			if (done) {

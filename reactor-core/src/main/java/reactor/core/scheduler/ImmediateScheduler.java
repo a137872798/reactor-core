@@ -27,6 +27,7 @@ import reactor.core.Scannable;
  * This scheduler is NOT time-capable (can't schedule with delay / periodically).
  *
  * @author Stephane Maldini
+ * 该对象不具备定时功能 这里甚至没有借助其他线程 而是在本线程中直接执行
  */
 final class ImmediateScheduler implements Scheduler, Scannable {
 
@@ -41,7 +42,13 @@ final class ImmediateScheduler implements Scheduler, Scannable {
     }
     
     static final Disposable FINISHED = Disposables.disposed();
-    
+
+    /**
+     * 设置的定时任务 会直接触发
+     * @param task the task to execute
+     *
+     * @return
+     */
     @Override
     public Disposable schedule(Runnable task) {
         task.run();
@@ -67,6 +74,9 @@ final class ImmediateScheduler implements Scheduler, Scannable {
         return new ImmediateSchedulerWorker();
     }
 
+    /**
+     * 创建 worker 对象 该对象 也具备执行任务的能力
+     */
     static final class ImmediateSchedulerWorker implements Scheduler.Worker, Scannable {
         
         volatile boolean shutdown;

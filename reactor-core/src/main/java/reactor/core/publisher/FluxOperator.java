@@ -31,6 +31,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <I> delegate {@link Publisher} type
  * @param <O> produced type
+ *           Flux 包装器
  */
 public abstract class FluxOperator<I, O> extends Flux<O> implements Scannable {
 

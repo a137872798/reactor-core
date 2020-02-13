@@ -21,6 +21,9 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.stream.Stream;
 
+/**
+ * 内部包含2组键值对
+ */
 final class Context2 implements CoreContext {
 
 	final Object key1;
@@ -54,6 +57,11 @@ final class Context2 implements CoreContext {
 		return new Context3(this.key1, this.value1, this.key2, this.value2, key, value);
 	}
 
+	/**
+	 * 如果删除的键 命中了当前存在的键  那么进行降级
+	 * @param key the key to remove.
+	 * @return
+	 */
 	@Override
 	public Context delete(Object key) {
 		Objects.requireNonNull(key, "key");

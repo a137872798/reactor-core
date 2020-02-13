@@ -29,6 +29,7 @@ import reactor.util.context.Context;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 通过函数来延迟创建 flux 对象 (当设置订阅者时)
  */
 final class FluxDeferWithContext<T> extends Flux<T> implements SourceProducer<T> {
 
@@ -38,6 +39,10 @@ final class FluxDeferWithContext<T> extends Flux<T> implements SourceProducer<T>
 		this.supplier = Objects.requireNonNull(supplier, "supplier");
 	}
 
+	/**
+	 * 设置订阅者
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		Publisher<? extends T> p;

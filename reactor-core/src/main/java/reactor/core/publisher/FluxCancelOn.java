@@ -34,6 +34,11 @@ final class FluxCancelOn<T> extends InternalFluxOperator<T, T> {
 		this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
 	}
 
+	/**
+	 * 该方法会包装订阅者
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super T> actual) {
 		return new CancelSubscriber<T>(actual, scheduler);
@@ -46,6 +51,9 @@ final class FluxCancelOn<T> extends InternalFluxOperator<T, T> {
 		return super.scanUnsafe(key);
 	}
 
+	/**
+	 * @param <T>
+	 */
 	static final class CancelSubscriber<T>
 			implements InnerOperator<T, T>, Runnable {
 
@@ -111,6 +119,9 @@ final class FluxCancelOn<T> extends InternalFluxOperator<T, T> {
 			s.request(n);
 		}
 
+		/**
+		 * cancel 方法通过调度器的其他线程执行
+		 */
 		@Override
 		public void cancel() {
 			if (CANCELLED.compareAndSet(this, 0, 1)) {

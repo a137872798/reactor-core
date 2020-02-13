@@ -43,6 +43,7 @@ import reactor.util.context.Context;
  * @param <R> the output value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 上游每下发一个元素都会被转换成 pub 之后 再消费 pub 的数据 如果此时上游发射了一个新的元素 那么终止之前的pub
  */
 final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 
@@ -75,6 +76,11 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 		return Integer.MAX_VALUE;
 	}
 
+	/**
+	 * 为该对象设置订阅者
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super R> actual) {
 		//for now switchMap doesn't support onErrorContinue, so the scalar version shouldn't either
@@ -87,6 +93,11 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 				queueSupplier.get(), prefetch);
 	}
 
+	/**
+	 * 切换对象
+	 * @param <T>
+	 * @param <R>
+	 */
 	static final class SwitchMapMain<T, R> implements InnerOperator<T, R> {
 
 		final Function<? super T, ? extends Publisher<? extends R>> mapper;
@@ -184,13 +195,19 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 			return Stream.of(inner);
 		}
 
+		/**
+		 * 入口
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
 
+				// 触发本对象的 request 方法  主要就是增加 requested
 				actual.onSubscribe(this);
 
+				// 向上游拉取数据 会转发到 onNext
 				s.request(Long.MAX_VALUE);
 			}
 		}
@@ -202,8 +219,10 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 				return;
 			}
 
+			// 每当上游发射一个数据时 修改偏移量
 			long idx = INDEX.incrementAndGet(this);
 
+			// 关闭之前的 对象
 			SwitchMapInner<R> si = inner;
 			if (si != null) {
 				si.deactivate();
@@ -224,6 +243,7 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 			SwitchMapInner<R> innerSubscriber =
 					new SwitchMapInner<>(this, prefetch, idx);
 
+			// 标记当前 inner 对象
 			if (INNER.compareAndSet(this, si, innerSubscriber)) {
 				ACTIVE.getAndIncrement(this);
 				p.subscribe(innerSubscriber);
@@ -305,6 +325,9 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 			q.clear();
 		}
 
+		/**
+		 * 处理数据
+		 */
 		void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
 				return;
@@ -323,6 +346,7 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 				while (r != e) {
 					boolean d = active == 0;
 
+					// 拉取数据对应的 子对象
 					@SuppressWarnings("unchecked") SwitchMapInner<R> si =
 							(SwitchMapInner<R>) q.poll();
 
@@ -336,11 +360,13 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 						break;
 					}
 
+					// 拉取上游传过来的实际数据
 					Object second;
 
 					while ((second = q.poll()) == null) {
 					}
 
+					// 匹配成功 往下游传播数据
 					if (index == si.index) {
 
 						@SuppressWarnings("unchecked") R v = (R) second;
@@ -393,7 +419,13 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 			return false;
 		}
 
+		/**
+		 * 接收从上游发来的数据
+		 * @param inner
+		 * @param value
+		 */
 		void innerNext(SwitchMapInner<R> inner, R value) {
+			// 插入队列的函数  reactor 内部有一些队列的插入可以串一个谓语参数 就比如当前对象
 			if (queueBiAtomic != null) {
 				//the queue is a "BiQueue" from Reactor, test(A, B) actually does double insertion
 				queueBiAtomic.test(inner, value);
@@ -403,6 +435,7 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 				queue.offer(inner);
 				queue.offer(value);
 			}
+			// 插入后尝试拉取数据
 			drain();
 		}
 
@@ -427,6 +460,10 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 		}
 	}
 
+	/**
+	 * Main 对应的子对象
+	 * @param <R>
+	 */
 	static final class SwitchMapInner<R> implements InnerConsumer<R>, Subscription {
 
 		final SwitchMapMain<?, R> parent;
@@ -474,6 +511,10 @@ final class FluxSwitchMap<T, R> extends InternalFluxOperator<T, R> {
 			return null;
 		}
 
+		/**
+		 * 指定 subscription 并拉取数据
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			Subscription a = this.s;

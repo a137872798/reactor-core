@@ -32,6 +32,7 @@ import reactor.util.annotation.Nullable;
  * @param <R> the result value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该flux 对象 具备映射功能 触发 onNext 时 会映射成不同类型 再委托给真正的 flux
  */
 final class FluxMap<T, R> extends InternalFluxOperator<T, R> {
 

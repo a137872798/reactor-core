@@ -30,11 +30,18 @@ import reactor.util.context.Context;
 
 /**
  * Reactive Streams Commons safe exit
+ * Subscriber 与 CoreSubscriber 的适配器
  */
 final class StrictSubscriber<T> implements Scannable, CoreSubscriber<T>, Subscription {
 
+	/**
+	 * 内部包含的 原始 订阅者
+	 */
 	final Subscriber<? super T> actual;
 
+	/**
+	 * 订阅者对象内部会包含一个 与 上游数据关联的subscription
+	 */
 	volatile Subscription s;
 	@SuppressWarnings("rawtypes")
 	static final AtomicReferenceFieldUpdater<StrictSubscriber, Subscription> S =

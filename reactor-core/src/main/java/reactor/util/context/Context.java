@@ -39,6 +39,7 @@ import reactor.util.annotation.Nullable;
  * implementation backed by a new {@link java.util.Map} on each {@link #put}.
  *
  * @author Stephane Maldini
+ * 上下文对象接口  内部就是一系列的键值对 跟rxjava一样
  */
 public interface Context {
 
@@ -46,6 +47,7 @@ public interface Context {
 	 * Return an empty {@link Context}
 	 *
 	 * @return an empty {@link Context}
+	 * 获取一个空的上下文对象
 	 */
 	static Context empty() {
 		return Context0.INSTANCE;
@@ -58,6 +60,7 @@ public interface Context {
 	 * @param value the value for the key.
 	 * @return a {@link Context} with a single entry.
 	 * @throws NullPointerException if either key or value are null
+	 * 返回一组键值对 对应的 context  对象
 	 */
 	static Context of(Object key, Object value) {
 		return new Context1(key, value);
@@ -148,6 +151,7 @@ public interface Context {
 	 *
 	 * @implNote this method compacts smaller maps into a relevant fields-based implementation
 	 * when map size is less than 6.
+	 * 根据  map 内部键值对的数量 转换成对应的context 对象
 	 */
 	static Context of(Map<?, ?> map) {
 		int size = Objects.requireNonNull(map, "map").size();
@@ -179,13 +183,14 @@ public interface Context {
 		}
 		// Since ContextN(Map) is a low level API that DOES NOT perform null checks,
 		// we need to check every key/value before passing it to ContextN(Map)
+		// 检测 确保内部不存在空值
 		map.forEach((key, value) -> {
 			Objects.requireNonNull(key, "null key found");
 			if (value == null) {
 				throw new NullPointerException("null value for key " + key);
 			}
 		});
-		//noinspection unchecked
+		//noinspection unchecked  contextN 代表内部有多个键值对
 		return new ContextN((Map) map);
 	}
 
@@ -201,6 +206,7 @@ public interface Context {
 	 * @see #getOrDefault(Object, Object)
 	 * @see #getOrEmpty(Object)
 	 * @see #hasKey(Object)
+	 * context 接口本身具备一个方法 就是通过key 来获取 value 属性
 	 */
 	<T> T get(Object key);
 
@@ -215,6 +221,7 @@ public interface Context {
 	 * @throws NoSuchElementException when the given type key is not present
 	 * @see #getOrDefault(Object, Object)
 	 * @see #getOrEmpty(Object)
+	 * 如果根据类型来查询 value 必须是该类型的一个实例
 	 */
 	default <T> T get(Class<T> key){
 		T v = get((Object)key);
@@ -233,6 +240,7 @@ public interface Context {
 	 * @param defaultValue a fallback value if key doesn't resolve
 	 *
 	 * @return the value resolved for this key, or the given default if not present
+	 * 根据key 查询 如果不存在 返回默认值
 	 */
 	@Nullable
 	default <T> T getOrDefault(Object key, @Nullable T defaultValue){
@@ -262,6 +270,7 @@ public interface Context {
 	 * @param key a lookup key to test for
 	 *
 	 * @return true if this context contains the given key
+	 * 判断键值对中 是否包含某个key
 	 */
 	boolean hasKey(Object key);
 
@@ -269,6 +278,7 @@ public interface Context {
 	 * Return true if the {@link Context} is empty.
 	 *
 	 * @return true if the {@link Context} is empty.
+	 * 判断该上下文对象内部是否为空
 	 */
 	default boolean isEmpty() {
 		return size() == 0;
@@ -314,6 +324,7 @@ public interface Context {
 	 *
 	 * @param key the key to remove.
 	 * @return a new {@link Context} that doesn't include the provided key
+	 * 从上下文中 删除某个 key/value 同时返回原对象 这里会对 context 做 降级处理 比如从context2 -> context1
 	 */
 	Context delete(Object key);
 
@@ -328,6 +339,7 @@ public interface Context {
 	 * Stream key/value pairs from this {@link Context}
 	 *
 	 * @return a {@link Stream} of key/value pairs held by this context
+	 * 将该上下文对象 转换成一个 流  该stream 是 java8的接口
 	 */
 	Stream<Map.Entry<Object,Object>> stream();
 

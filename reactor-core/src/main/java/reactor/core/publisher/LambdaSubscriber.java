@@ -31,6 +31,7 @@ import reactor.util.context.Context;
  * An unbounded Java Lambda adapter to {@link Subscriber}
  *
  * @param <T> the value type
+ *           通过各种函数模拟的订阅者
  */
 final class LambdaSubscriber<T>
 		implements InnerConsumer<T>, Disposable {

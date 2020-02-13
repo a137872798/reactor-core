@@ -1438,7 +1438,7 @@ public class StepVerifierTests {
 	}
 
 	@Test
-	public void noCancelOnUnexpectedErrorSignal() {
+	public void noUnexpectedErrorSignal() {
 		LongAdder cancelled = new LongAdder();
 		assertThatExceptionOfType(AssertionError.class)
 				.isThrownBy(() -> StepVerifier.create(Flux.error(new IllegalArgumentException())

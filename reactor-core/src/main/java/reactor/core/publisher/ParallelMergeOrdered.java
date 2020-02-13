@@ -31,6 +31,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the value type
  * @author Simon Baslé
+ * 接收并行数据 排序后结合发送到下游 (看作一个普通flux)
  */
 final class ParallelMergeOrdered<T> extends Flux<T> implements Scannable {
 

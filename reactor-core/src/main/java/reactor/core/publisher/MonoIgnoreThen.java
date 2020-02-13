@@ -36,6 +36,7 @@ import reactor.util.context.Context;
  * the last Mono source generates.
  *
  * @param <T> the final value type
+ *           当 一组pub 全部发送完后 将last发送到下游
  */
 final class MonoIgnoreThen<T> extends Mono<T> implements Fuseable, Scannable {
 
@@ -77,7 +78,11 @@ final class MonoIgnoreThen<T> extends Mono<T> implements Fuseable, Scannable {
     public Object scanUnsafe(Attr key) {
         return null; //no particular key to be represented, still useful in hooks
     }
-    
+
+    /**
+     * 该对象会忽略内部的 pub 并在它们都触发onComplete 后 下发 mono的数据
+     * @param <T>
+     */
     static final class ThenIgnoreMain<T>
             extends Operators.MonoSubscriber<T, T> {
         final ThenIgnoreInner ignore;
@@ -102,7 +107,9 @@ final class MonoIgnoreThen<T> extends Mono<T> implements Fuseable, Scannable {
             super(subscriber);
             this.ignoreMonos = ignoreMonos;
             this.lastMono = lastMono;
+            // 该对象用于消费 ignore[]
             this.ignore = new ThenIgnoreInner(this);
+            // 该对象用于接收 lastMono
             this.accept = new ThenAcceptInner<>(this);
         }
 
@@ -111,6 +118,9 @@ final class MonoIgnoreThen<T> extends Mono<T> implements Fuseable, Scannable {
 		    return Stream.of(ignore, accept);
 	    }
 
+        /**
+         * 开始拉取数据
+         */
 	    @SuppressWarnings("unchecked")
         void drain() {
             if (WIP.getAndIncrement(this) != 0) {
@@ -126,8 +136,10 @@ final class MonoIgnoreThen<T> extends Mono<T> implements Fuseable, Scannable {
 
                     Publisher<?>[] a = ignoreMonos;
                     int i = index;
+                    // 代表 所有ignore[] 都触发了onCompelte
                     if (i == a.length) {
                         ignore.clear();
+                        // 将 lastMono 的数据发送到下游
                         Mono<T> m = lastMono;
                         if (m instanceof Callable) {
                             T v;
@@ -152,6 +164,7 @@ final class MonoIgnoreThen<T> extends Mono<T> implements Fuseable, Scannable {
                         active = true;
                         m.subscribe(accept);
                     } else {
+                        // 获取对应的 需要被 忽略的订阅者
                         Publisher<?> m = a[i];
                         index = i + 1;
                         
@@ -184,13 +197,19 @@ final class MonoIgnoreThen<T> extends Mono<T> implements Fuseable, Scannable {
             ignore.cancel();
             accept.cancel();
         }
-        
+
+        /**
+         * 代表 某个pub 的数据都发射完了
+         */
         void ignoreDone() {
             active = false;
             drain();
         }
     }
-    
+
+    /**
+     * 该对象用于 订阅内部的 ignore pub 对象
+     */
     static final class ThenIgnoreInner implements InnerConsumer<Object> {
         final ThenIgnoreMain<?> parent;
         
@@ -248,7 +267,11 @@ final class MonoIgnoreThen<T> extends Mono<T> implements Fuseable, Scannable {
             S.lazySet(this, null);
         }
     }
-    
+
+    /**
+     * 接收lastMono
+     * @param <T>
+     */
     static final class ThenAcceptInner<T> implements InnerConsumer<T> {
         final ThenIgnoreMain<T> parent;
         

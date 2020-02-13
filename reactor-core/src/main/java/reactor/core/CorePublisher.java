@@ -30,6 +30,7 @@ import reactor.util.context.Context;
  * @param <T> the {@link CoreSubscriber} data type
  *
  * @since 3.3.0
+ * 拓展了响应式规范的发布者对象
  */
 public interface CorePublisher<T> extends Publisher<T> {
 
@@ -42,6 +43,7 @@ public interface CorePublisher<T> extends Publisher<T> {
 	 *
 	 * @param subscriber the {@link Subscriber} interested into the published sequence
 	 * @see Publisher#subscribe(Subscriber)
+	 * 设置订阅者
 	 */
 	void subscribe(CoreSubscriber<? super T> subscriber);
 

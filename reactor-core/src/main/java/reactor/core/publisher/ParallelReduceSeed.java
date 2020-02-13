@@ -32,14 +32,21 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the input value type
  * @param <R> the result value type
+ *           将数据作一个转换
  */
 final class ParallelReduceSeed<T, R> extends ParallelFlux<R> implements
                                                              Scannable, Fuseable {
 
 	final ParallelFlux<? extends T> source;
 
+	/**
+	 * 用于指定初始值
+	 */
 	final Supplier<R> initialSupplier;
 
+	/**
+	 * 加工函数
+	 */
 	final BiFunction<R, ? super T, R> reducer;
 
 	ParallelReduceSeed(ParallelFlux<? extends T> source,
@@ -66,6 +73,7 @@ final class ParallelReduceSeed<T, R> extends ParallelFlux<R> implements
 
 	@Override
 	public void subscribe(CoreSubscriber<? super R>[] subscribers) {
+		// 确保并行度 与数组长度一致
 		if (!validate(subscribers)) {
 			return;
 		}
@@ -90,6 +98,7 @@ final class ParallelReduceSeed<T, R> extends ParallelFlux<R> implements
 					new ParallelReduceSeedSubscriber<>(subscribers[i], initialValue, reducer);
 		}
 
+		// 生成转发对象
 		source.subscribe(parents);
 	}
 
@@ -105,11 +114,19 @@ final class ParallelReduceSeed<T, R> extends ParallelFlux<R> implements
 	}
 
 
+	/**
+	 * 该对象作为转发对象 先接收上游的数据 同样会将单个结果发送到下游
+	 * @param <T>
+	 * @param <R>
+	 */
 	static final class ParallelReduceSeedSubscriber<T, R>
 			extends Operators.MonoSubscriber<T, R> {
 
 		final BiFunction<R, ? super T, R> reducer;
 
+		/**
+		 * 每次累加后的结果
+		 */
 		R accumulator;
 
 		Subscription s;

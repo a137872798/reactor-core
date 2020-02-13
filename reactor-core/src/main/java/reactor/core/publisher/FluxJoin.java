@@ -49,6 +49,9 @@ import reactor.util.concurrent.Queues;
 final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 		InternalFluxOperator<TLeft, R> {
 
+	/**
+	 * 代表另一个数据源
+	 */
 	final Publisher<? extends TRight> other;
 
 	final Function<? super TLeft, ? extends Publisher<TLeftEnd>> leftEnd;
@@ -62,6 +65,7 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 			Function<? super TLeft, ? extends Publisher<TLeftEnd>> leftEnd,
 			Function<? super TRight, ? extends Publisher<TRightEnd>> rightEnd,
 			BiFunction<? super TLeft, ? super TRight, ? extends R> resultSelector) {
+		// 代表本数据源
 		super(source);
 		this.other = Objects.requireNonNull(other, "other");
 		this.leftEnd = Objects.requireNonNull(leftEnd, "leftEnd");
@@ -69,6 +73,11 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 		this.resultSelector = Objects.requireNonNull(resultSelector, "resultSelector");
 	}
 
+	/**
+	 * 包装订阅者
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	public CoreSubscriber<? super TLeft> subscribeOrReturn(CoreSubscriber<? super R> actual) {
 
@@ -78,8 +87,10 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 						rightEnd,
 						resultSelector);
 
+		// 就是为 parent 增加  requested
 		actual.onSubscribe(parent);
 
+		// 增加2个子对象 一个对应source 一个对应other
 		LeftRightSubscriber left = new LeftRightSubscriber(parent, true);
 		parent.cancellations.add(left);
 		LeftRightSubscriber right = new LeftRightSubscriber(parent, false);
@@ -90,6 +101,14 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 		return null;
 	}
 
+	/**
+	 * join 的包装对象
+	 * @param <TLeft>
+	 * @param <TRight>
+	 * @param <TLeftEnd>
+	 * @param <TRightEnd>
+	 * @param <R>
+	 */
 	static final class JoinSubscription<TLeft, TRight, TLeftEnd, TRightEnd, R>
 			implements JoinSupport<R> {
 
@@ -98,6 +117,7 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 
 		final Disposable.Composite cancellations;
 
+		// 代表存放左右数据的容器
 		final Map<Integer, TLeft> lefts;
 
 		final Map<Integer, TRight> rights;
@@ -184,6 +204,10 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 			return JoinSupport.super.scanUnsafe(key);
 		}
 
+		/**
+		 * 触发 request
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
@@ -211,17 +235,22 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 			a.onError(ex);
 		}
 
+		/**
+		 * 尝试生成数据 并传递到下游
+		 */
 		void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
 				return;
 			}
 
 			int missed = 1;
+			// 队列中存放了 左右的数据
 			Queue<Object> q = queue;
 			Subscriber<? super R> a = actual;
 
 			for (; ; ) {
 				for (; ; ) {
+					// 如果 数据已经被丢弃
 					if (cancellations.isDisposed()) {
 						q.clear();
 						return;
@@ -235,12 +264,15 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 						return;
 					}
 
+					// active 代表当前有 几个数据源活跃 默认是 left 和 right (2个)
 					boolean d = active == 0;
 
+					// mode 对应左还是右
 					Integer mode = (Integer) q.poll();
 
 					boolean empty = mode == null;
 
+					// 代表内部的数据都处理完了
 					if (d && empty) {
 
 						lefts.clear();
@@ -251,21 +283,25 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 						return;
 					}
 
+					// 代表队列中还没有数据
 					if (empty) {
 						break;
 					}
 
 					Object val = q.poll();
 
+					// 如果是 source 下发的数据
 					if (mode == LEFT_VALUE) {
 						@SuppressWarnings("unchecked") TLeft left = (TLeft) val;
 
+						// 存放到左容器
 						int idx = leftIndex++;
 						lefts.put(idx, left);
 
 						Publisher<TLeftEnd> p;
 
 						try {
+							// 下发的每个元素 又看作一个 pub
 							p = Objects.requireNonNull(leftEnd.apply(left),
 									"The leftEnd returned a null Publisher");
 						}
@@ -278,10 +314,12 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 							return;
 						}
 
+						// 对象又会追加到 cancel 容器中
 						LeftRightEndSubscriber end =
 								new LeftRightEndSubscriber(this, true, idx);
 						cancellations.add(end);
 
+						// 激活新的 pub 往下发送数据
 						p.subscribe(end);
 
 						ex = error;
@@ -449,12 +487,24 @@ final class FluxJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 			drain();
 		}
 
+		/**
+		 * 当子对象接收到数据后 触发该方法
+		 * @param isLeft
+		 * @param o
+		 */
 		@Override
 		public void innerValue(boolean isLeft, Object o) {
+			// 左右节点会共用一个队列 队列中每个元素 会标记是 左元素 还是右元素
 			queueBiOffer.test(isLeft ? LEFT_VALUE : RIGHT_VALUE, o);
+			// 尝试生成数据并传递到下游
 			drain();
 		}
 
+		/**
+		 * 代表下游某个子任务完成了
+		 * @param isLeft
+		 * @param index
+		 */
 		@Override
 		public void innerClose(boolean isLeft, LeftRightEndSubscriber index) {
 			queueBiOffer.test(isLeft ? LEFT_CLOSE : RIGHT_CLOSE, index);

@@ -31,6 +31,7 @@ import reactor.core.Exceptions;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 当处理source 遇到异常时 生成一个降级的pub 并使用那个对象 发送数据到下游
  */
 final class FluxOnErrorResume<T> extends InternalFluxOperator<T, T> {
 
@@ -65,6 +66,7 @@ final class FluxOnErrorResume<T> extends InternalFluxOperator<T, T> {
 			if (!second) {
 				actual.onSubscribe(this);
 			}
+			// 更新subscription
 			set(s);
 		}
 

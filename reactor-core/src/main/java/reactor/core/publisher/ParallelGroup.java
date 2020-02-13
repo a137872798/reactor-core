@@ -53,6 +53,7 @@ final class ParallelGroup<T> extends Flux<GroupedFlux<Integer, T>> implements
 			groups[i] = new ParallelInnerGroup<>(i);
 		}
 
+		// 该方法 会让actual 接收的数据 都是ParallelInnerGroup  之后可以单独订阅这些数据
 		FluxArray.subscribe(actual, groups);
 
 		source.subscribe(groups);

@@ -36,6 +36,7 @@ import reactor.util.annotation.Nullable;
  * item padding has a toll on short lived or bursty uses and lookahead doesn't really matter with small queues.
  * 
  * @param <T> the value type
+ *           该对象使用了 缓存行填充  该对象不同于 spscLinked 当容量满时不会扩容 而是提示插入失败
  */
 final class SpscArrayQueue<T> extends SpscArrayQueueP3<T> implements Queue<T> {
 	/** */

@@ -51,6 +51,7 @@ import reactor.util.annotation.Nullable;
  *
  * @author Stephane Maldini
  * @author Simon Baslé
+ * 弹性线程池 跟 BoundedElasticScheduler 类似 不过没有 线程池数量限制
  */
 final class ElasticScheduler implements Scheduler, Supplier<ScheduledExecutorService>, Scannable {
 

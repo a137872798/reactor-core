@@ -32,6 +32,7 @@ import reactor.util.annotation.Nullable;
  * Note that the class implements Subscription to save on allocation.
  *
  * @param <T> the value type
+ *           确保在并发环境中时下发到下游的元素是串行的
  */
 final class SerializedSubscriber<T> implements InnerOperator<T, T> {
 
@@ -57,6 +58,10 @@ final class SerializedSubscriber<T> implements InnerOperator<T, T> {
 		this.actual = actual;
 	}
 
+	/**
+	 * 为该对象设置数据源
+	 * @param s
+	 */
 	@Override
 	public void onSubscribe(Subscription s) {
 		if (Operators.validate(this.s, s)) {
@@ -66,6 +71,10 @@ final class SerializedSubscriber<T> implements InnerOperator<T, T> {
 		}
 	}
 
+	/**
+	 * 下发数据
+	 * @param t
+	 */
 	@Override
 	public void onNext(T t) {
 		if (cancelled || done) {
@@ -77,17 +86,20 @@ final class SerializedSubscriber<T> implements InnerOperator<T, T> {
 				return;
 			}
 
+			// 在并发环境 先将元素存储到一个队列中 而不是急着下发  因为在 synchronized 所以不需要使用并发队列
 			if (emitting) {
 				serAdd(t);
 				missed = true;
 				return;
 			}
 
+			// 代表当前有个线程正在下发数据
 			emitting = true;
 		}
 
 		actual.onNext(t);
 
+		// 按照串行的方式 挨个下发元素
 		serDrainLoop(actual);
 	}
 
@@ -136,6 +148,10 @@ final class SerializedSubscriber<T> implements InnerOperator<T, T> {
 		actual.onComplete();
 	}
 
+	/**
+	 * 向上游拉取数据
+	 * @param n
+	 */
 	@Override
 	public void request(long n) {
 		s.request(n);
@@ -147,7 +163,12 @@ final class SerializedSubscriber<T> implements InnerOperator<T, T> {
 		s.cancel();
 	}
 
+	/**
+	 * 将元素暂存到一个队列中
+	 * @param value
+	 */
 	void serAdd(T value) {
+		// 看来是 数组+ 链表的结构
 		LinkedArrayNode<T> t = tail;
 
 		if (t == null) {
@@ -157,18 +178,24 @@ final class SerializedSubscriber<T> implements InnerOperator<T, T> {
 			tail = t;
 		}
 		else {
+			// 代表达到数组长度上限 需要增加一个新节点
 			if (t.count == LinkedArrayNode.DEFAULT_CAPACITY) {
 				LinkedArrayNode<T> n = new LinkedArrayNode<>(value);
 
 				t.next = n;
 				tail = n ;
 			}
+			// 追加到链表节点的数组中
 			else {
 				t.array[t.count++] = value;
 			}
 		}
 	}
 
+	/**
+	 * 将链表结构内的数据挨个下发
+	 * @param actual
+	 */
 	void serDrainLoop(CoreSubscriber<? super T> actual) {
 		for (; ; ) {
 
@@ -262,6 +289,7 @@ final class SerializedSubscriber<T> implements InnerOperator<T, T> {
 	 * Node in a linked array list that is only appended.
 	 *
 	 * @param <T> the value type
+	 *           该对象是一个链表 + 数组的结构
 	 */
 	static final class LinkedArrayNode<T> {
 

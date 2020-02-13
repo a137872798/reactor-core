@@ -21,6 +21,9 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.stream.Stream;
 
+/**
+ * 该对象内部包含一组键值对
+ */
 final class Context1 implements CoreContext {
 
 	final Object key;
@@ -36,6 +39,7 @@ final class Context1 implements CoreContext {
 		Objects.requireNonNull(key, "key");
 		Objects.requireNonNull(value, "value");
 
+		// 如果添加的key 跟内部已经存在的一致 不进行升级
 		if(this.key.equals(key)){
 			return new Context1(key, value);
 		}
@@ -66,11 +70,20 @@ final class Context1 implements CoreContext {
 		throw new NoSuchElementException("Context does not contain key: " + key);
 	}
 
+	/**
+	 * 生成的 stream 内部就是一个个 entry
+	 * @return
+	 */
 	@Override
 	public Stream<Map.Entry<Object, Object>> stream() {
 		return Stream.of(new AbstractMap.SimpleImmutableEntry<>(key, value));
 	}
 
+	/**
+	 * 结合2个 context 就是遍历 + put
+	 * @param base the {@link Context} in which we're putting all our values
+	 * @return
+	 */
 	@Override
 	public Context putAllInto(Context base) {
 		return base.put(key, value);
@@ -78,6 +91,7 @@ final class Context1 implements CoreContext {
 
 	@Override
 	public void unsafePutAllInto(ContextN other) {
+		// 自定义结合的函数 便于自己做控制
 		other.accept(key, value);
 	}
 

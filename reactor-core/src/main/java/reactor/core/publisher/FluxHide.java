@@ -27,6 +27,7 @@ import reactor.util.annotation.Nullable;
  *
  * @param <T> the value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 包装对象 实际上只是做了一层代理 没有其他操作
  */
 final class FluxHide<T> extends InternalFluxOperator<T, T> {
 

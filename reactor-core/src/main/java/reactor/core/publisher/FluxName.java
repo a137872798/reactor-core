@@ -37,6 +37,9 @@ import reactor.util.function.Tuples;
  */
 final class FluxName<T> extends InternalFluxOperator<T, T> {
 
+	/**
+	 * 为 flux 定制name 属性
+	 */
 	final String name;
 
 	final Set<Tuple2<String, String>> tags;
@@ -88,6 +91,12 @@ final class FluxName<T> extends InternalFluxOperator<T, T> {
 		return new FluxName<>(source, null, tags);
 	}
 
+	/**
+	 * fluxName 可以理解为 flux 的包装类
+	 * @param source
+	 * @param name
+	 * @param tags
+	 */
 	FluxName(Flux<? extends T> source,
 			@Nullable String name,
 			@Nullable Set<Tuple2<String, String>> tags) {

@@ -32,8 +32,14 @@ import reactor.util.annotation.Nullable;
  */
 final class FluxConcatArray<T> extends Flux<T> implements SourceProducer<T> {
 
+	/**
+	 * 该对象 内部 由多个 pub 组成
+	 */
 	final Publisher<? extends T>[] array;
-	
+
+	/**
+	 * 是否支持延迟触发
+	 */
 	final boolean delayError;
 
 	@SafeVarargs
@@ -42,6 +48,10 @@ final class FluxConcatArray<T> extends Flux<T> implements SourceProducer<T> {
 		this.delayError = delayError;
 	}
 
+	/**
+	 * 当 设置订阅者时
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		Publisher<? extends T>[] a = array;
@@ -61,6 +71,7 @@ final class FluxConcatArray<T> extends Flux<T> implements SourceProducer<T> {
 			return;
 		}
 
+		//  该对象与下面的对象相比 不支持延迟触发
 		if (delayError) {
 			ConcatArrayDelayErrorSubscriber<T> parent = new
 					ConcatArrayDelayErrorSubscriber<>(actual, a);
@@ -72,6 +83,8 @@ final class FluxConcatArray<T> extends Flux<T> implements SourceProducer<T> {
 			}
 			return;
 		}
+
+		// 将该对象包装成 subscription  跟 FluxConcatIterable 同一个套路
 		ConcatArraySubscriber<T> parent = new ConcatArraySubscriber<>(actual, a);
 
 		actual.onSubscribe(parent);
@@ -217,6 +230,10 @@ final class FluxConcatArray<T> extends Flux<T> implements SourceProducer<T> {
 		}
 	}
 
+	/**
+	 * 禁止延迟触发
+	 * @param <T>
+	 */
 	static final class ConcatArrayDelayErrorSubscriber<T>
 			extends Operators.MultiSubscriptionSubscriber<T, T> {
 

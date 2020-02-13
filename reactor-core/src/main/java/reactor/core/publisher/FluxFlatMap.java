@@ -43,13 +43,24 @@ import reactor.util.context.Context;
  * @param <T> the source value type
  * @param <R> the result value type
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象的最上游数据 可以被转换成 pub  然后每个 pub的元素 会作为该对象的元素 传播到下游 该对象的特点就是 数据不分顺序
+ * 处在最上游的多个 pub 发布的数据会不按顺序的传播到最下面
  */
 final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 
+	/**
+	 * 内部数据发送到 下游时使用的映射函数
+	 */
 	final Function<? super T, ? extends Publisher<? extends R>> mapper;
 
+	/**
+	 * 是否支持延时
+	 */
 	final boolean delayError;
 
+	/**
+	 * 支持的最大并行度
+	 */
 	final int maxConcurrency;
 
 	final Supplier<? extends Queue<R>> mainQueueSupplier;
@@ -87,12 +98,18 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 		return prefetch;
 	}
 
+	/**
+	 * 当为该对象设置订阅者时 会通过该函数做转换
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super R> actual) {
 		if (trySubscribeScalarMap(source, actual, mapper, false, true)) {
 			return null;
 		}
 
+		// 将订阅者 包装成一个 Main 对象
 		return new FlatMapMain<>(actual,
 				mapper,
 				delayError,
@@ -209,6 +226,11 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 		return false;
 	}
 
+	/**
+	 * 下游订阅者会被包装成该对象
+	 * @param <T>
+	 * @param <R>
+	 */
 	static final class FlatMapMain<T, R> extends FlatMapTracker<FlatMapInner<R>>
 			implements InnerOperator<T, R> {
 
@@ -246,9 +268,15 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 		static final AtomicIntegerFieldUpdater<FlatMapMain> WIP =
 				AtomicIntegerFieldUpdater.newUpdater(FlatMapMain.class, "wip");
 
+		/**
+		 * 代表数据源为空
+		 */
 		@SuppressWarnings("rawtypes")
 		static final FlatMapInner[] EMPTY = new FlatMapInner[0];
 
+		/**
+		 * 代表当前数据源已经终止
+		 */
 		@SuppressWarnings("rawtypes")
 		static final FlatMapInner[] TERMINATED = new FlatMapInner[0];
 
@@ -332,6 +360,10 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			entry.cancel();
 		}
 
+		/**
+		 * 对该对象发起拉数据的请求时
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			if (Operators.validate(n)) {
@@ -354,19 +386,27 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		// 这个是入口方法 同时 Subscription 是将自身封装后的结果对象  (Subscription 内部的subscriber 还是自己)
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
 
+				// 这里会先触发本对象的request 此时队列还是空的 无法拉取到任何数据
 				actual.onSubscribe(this);
+				// 该方法会 从source 也就是 flux 挨个将元素 往下 触发本对象的  onNext
 				s.request(Operators.unboundedOrPrefetch(maxConcurrency));
 			}
 		}
 
+		/**
+		 * 代表此时从 flux(source) 处接收到了数据
+		 * @param t
+		 */
 		@SuppressWarnings("unchecked")
 		@Override
 		public void onNext(T t) {
+			// 如果本对象已经被关闭了 那么丢弃该对象
 			if (done) {
 				Operators.onNextDropped(t, actual.currentContext());
 				return;
@@ -375,6 +415,7 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			Publisher<? extends R> p;
 
 			try {
+				// 将数据转换成发布者
 				p = Objects.requireNonNull(mapper.apply(t),
 				"The mapper returned a null Publisher");
 			}
@@ -413,8 +454,10 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 				tryEmitScalar(v);
 			}
 			else {
+				// 将结果填充到数组中
 				FlatMapInner<R> inner = new FlatMapInner<>(this, prefetch);
 				if (add(inner)) {
+					// 将 上游 flux 的数据 转发到 inner 中
 					p.subscribe(inner);
 				}
 			}
@@ -521,20 +564,32 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 该对象对应的上游 flux 实际内部可能包含多个 pub 然后每个pub 对应一个 inner 对象 这时 当上游发送数据到下游时
+		 * 触发 onNext 会转发到该方法
+		 * @param inner
+		 * @param v
+		 */
 		void tryEmit(FlatMapInner<R> inner, R v) {
 			if (wip == 0 && WIP.compareAndSet(this, 0, 1)) {
+				// 查看下游是否请求过数据
 				long r = requested;
 
+				// 获取该对象对应的队列
 				Queue<R> q = inner.queue;
+				// 如果对应 pub 的队列已经创建 则优先选择添加到队列中
 				if (r != 0 && (q == null || q.isEmpty())) {
+					// 将数据传播到真正的 subscriber 上
 					actual.onNext(v);
 
 					if (r != Long.MAX_VALUE) {
 						REQUESTED.decrementAndGet(this);
 					}
 
+					// 继续请求 pub 的数据
 					inner.request(1);
 				}
+				// 代表此时没有请求数了  为了不丢失数据 将数据暂存到队列中
 				else {
 					if (q == null) {
 						q = getOrCreateInnerQueue(inner);
@@ -550,6 +605,7 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 					return;
 				}
 
+				// 拉取队列中的数据
 				drainLoop();
 			}
 			else {
@@ -562,6 +618,9 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 拉取内部元素
+		 */
 		void drain() {
 			if (WIP.getAndIncrement(this) != 0) {
 				return;
@@ -569,23 +628,30 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			drainLoop();
 		}
 
+		/**
+		 * 不断循环拉取数据
+		 */
 		void drainLoop() {
 			int missed = 1;
 
+			// 下游真正的订阅者
 			final Subscriber<? super R> a = actual;
 
 			for (; ; ) {
 
 				boolean d = done;
 
+				// 获取内部数据
 				FlatMapInner<R>[] as = get();
 
 				int n = as.length;
 
 				Queue<R> sq = scalarQueue;
 
+				// 判断inner 是否为空
 				boolean noSources = isEmpty();
 
+				// 检查当前状态 同时关闭内部的数据体(subscription)
 				if (checkTerminated(d, noSources && (sq == null || sq.isEmpty()), a)) {
 					return;
 				}
@@ -601,6 +667,7 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 					while (e != r) {
 						d = done;
 
+						// 尝试从队列中拉取元素
 						R v = sq.poll();
 
 						boolean empty = v == null;
@@ -609,6 +676,7 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 							return;
 						}
 
+						// 如果此时队列还没有产生元素 那么退出循环
 						if (empty) {
 							break;
 						}
@@ -618,6 +686,7 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 						e++;
 					}
 
+					// 代表处理了几个元素 那么 减少 request
 					if (e != 0L) {
 						replenishMain += e;
 						if (r != Long.MAX_VALUE) {
@@ -627,6 +696,7 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 						again = true;
 					}
 				}
+				// 代表 request 还有剩余 且 已经设置过 inner
 				if (r != 0L && !noSources) {
 
 					int j = lastIndex;
@@ -644,6 +714,7 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 							return;
 						}
 
+						// 从下个 inner 对象的队列中 处理元素
 						FlatMapInner<R> inner = as[j];
 						if (inner != null) {
 							d = inner.done;
@@ -653,6 +724,7 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 								again = true;
 								replenishMain++;
 							}
+							// 处理队列中所有数据
 							else if (q != null) {
 								while (e != r) {
 									d = inner.done;
@@ -724,14 +796,17 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 							break;
 						}
 
+						// 这里会不断循环
 						if (++j == n) {
 							j = 0;
 						}
 					}
 
+					// 记录最后处理到的位置
 					lastIndex = j;
 				}
 
+				// 如果 请求数为0 queue 不为空
 				if (r == 0L && !noSources) {
 					as = get();
 					n = as.length;
@@ -767,6 +842,7 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 					}
 				}
 
+				// 继续拉取数据
 				if (replenishMain != 0L && !done && !cancelled) {
 					s.request(replenishMain);
 				}
@@ -782,11 +858,19 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 检查当前 subscription 是否已经被关闭
+		 * @param d
+		 * @param empty
+		 * @param a
+		 * @return
+		 */
 		boolean checkTerminated(boolean d, boolean empty, Subscriber<?> a) {
 			if (cancelled) {
 				Operators.onDiscardQueueWithClear(scalarQueue, actual.currentContext(), null);
 				scalarQueue = null;
 				s.cancel();
+				// 关闭内部所有的数据体 每个数据体都相当于一个 subscription
 				unsubscribe();
 
 				return true;
@@ -829,6 +913,11 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			return false;
 		}
 
+		/**
+		 * 代表下游某个对象出现异常了
+		 * @param inner
+		 * @param e
+		 */
 		void innerError(FlatMapInner<R> inner, Throwable e) {
 			e = Operators.onNextInnerError(e, currentContext(), s);
 			if(e != null) {
@@ -860,6 +949,10 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			return true;
 		}
 
+		/**
+		 * 代表 下游某个数据流已经接收完所有上游的数据了
+		 * @param inner
+		 */
 		void innerComplete(FlatMapInner<R> inner) {
 			//FIXME temp. reduce the case to empty regular inners
 //			if (wip == 0 && WIP.compareAndSet(this, 0, 1)) {
@@ -903,9 +996,16 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 
 	}
 
+	/**
+	 * 内部的数据体
+	 * @param <R>
+	 */
 	static final class FlatMapInner<R>
 			implements InnerConsumer<R>, Subscription {
 
+		/**
+		 * 该数据体属于哪个 main
+		 */
 		final FlatMapMain<?, R> parent;
 
 		final int prefetch;
@@ -939,6 +1039,10 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			this.limit = Operators.unboundedOrLimit(prefetch);
 		}
 
+		/**
+		 * 上游的 flux 内每个元素 都可以再转换成一个 flux (pub) 之后往该对象发送数据
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.setOnce(S, this, s)) {
@@ -959,10 +1063,15 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 					}
 					// NONE is just fall-through as the queue will be created on demand
 				}
+				// 调用该方法会间接从 上游发送数据到下游
 				s.request(Operators.unboundedOrPrefetch(prefetch));
 			}
 		}
 
+		/**
+		 * 代表从 上游的 pub 发送数据  这里会传播到 真正的 subscriber 上
+		 * @param t
+		 */
 		@Override
 		public void onNext(R t) {
 			if (sourceMode == Fuseable.ASYNC) {
@@ -973,6 +1082,10 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			}
 		}
 
+		/**
+		 * 当上游的数据发生异常时 传播到真正的subscriber
+		 * @param t
+		 */
 		@Override
 		public void onError(Throwable t) {
 			done = true;
@@ -986,6 +1099,10 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 			parent.innerComplete(this);
 		}
 
+		/**
+		 * 继续请求上游的数据
+		 * @param n
+		 */
 		@Override
 		public void request(long n) {
 			long p = produced + n;
@@ -1024,10 +1141,20 @@ final class FluxFlatMap<T, R> extends InternalFluxOperator<T, R> {
 	}
 }
 
+/**
+ * 链路对象
+ * @param <T>
+ */
 abstract class FlatMapTracker<T> {
 
+	/**
+	 * 内部数据体
+	 */
 	volatile T[] array = empty();
 
+	/**
+	 * 相当于位图 有值的代表 array 有数据
+	 */
 	int[] free = FREE_EMPTY;
 
 	long producerIndex;
@@ -1051,6 +1178,7 @@ abstract class FlatMapTracker<T> {
 
 	abstract void setIndex(T entry, int index);
 
+	// 触发内部所有元素的 注销
 	final void unsubscribe() {
 		T[] a;
 		T[] t = terminated();
@@ -1070,10 +1198,19 @@ abstract class FlatMapTracker<T> {
 		}
 	}
 
+	/**
+	 * 返回内部数据
+	 * @return
+	 */
 	final T[] get() {
 		return array;
 	}
 
+	/**
+	 * 将某个数据追加到数据源中
+	 * @param entry
+	 * @return
+	 */
 	final boolean add(T entry) {
 		T[] a = array;
 		if (a == terminated()) {
@@ -1085,8 +1222,10 @@ abstract class FlatMapTracker<T> {
 				return false;
 			}
 
+			// 获取当前空闲的下标
 			int idx = pollFree();
 			if (idx < 0) {
+				// 扩容
 				int n = a.length;
 				T[] b = n != 0 ? newArray(n << 1) : newArray(4);
 				System.arraycopy(a, 0, b, 0, n);
@@ -1124,10 +1263,15 @@ abstract class FlatMapTracker<T> {
 		}
 	}
 
+	/**
+	 * 寻找当前空闲的下标
+	 * @return
+	 */
 	int pollFree() {
 		int[] a = free;
 		int m = a.length - 1;
 		long ci = consumerIndex;
+		// 如果  con == pro 必须先等待 pro增加 所以返回-1
 		if (producerIndex == ci) {
 			return -1;
 		}
@@ -1136,6 +1280,10 @@ abstract class FlatMapTracker<T> {
 		return a[offset];
 	}
 
+	/**
+	 * 往某个位置 填充数据时 同时增加生产者的下标
+	 * @param index
+	 */
 	void offerFree(int index) {
 		int[] a = free;
 		int m = a.length - 1;

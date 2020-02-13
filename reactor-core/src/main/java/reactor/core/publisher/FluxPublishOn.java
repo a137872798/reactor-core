@@ -38,9 +38,14 @@ import reactor.util.annotation.Nullable;
  * @param <T> the value type
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
+ * 该对象向下游发射数据的动作是异步的  或者说是并发的 这样下游的onNext 方法就有可能是并发执行
  */
 final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fuseable {
 
+	/**
+	 * 调度器
+	 * 存在一个 ImmediateScheduler 代表直接在本线程执行任务
+	 */
 	final Scheduler scheduler;
 
 	final boolean delayError;
@@ -49,6 +54,9 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 
 	final int prefetch;
 
+	/**
+	 * 低潮???
+	 */
 	final int lowTide;
 
 	FluxPublishOn(Flux<? extends T> source,
@@ -80,6 +88,11 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 		return prefetch;
 	}
 
+	/**
+	 * 加工订阅者对象
+	 * @param actual
+	 * @return
+	 */
 	@Override
 	@SuppressWarnings("unchecked")
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super T> actual) {
@@ -105,6 +118,7 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 					queueSupplier));
 			return null;
 		}
+		// 这里使用 worker 来执行下发的任务
 		return new PublishOnSubscriber<>(actual,
 				scheduler,
 				worker,
@@ -114,6 +128,10 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 				queueSupplier);
 	}
 
+	/**
+	 * 该对象会使用调用器 来下发数据
+	 * @param <T>
+	 */
 	static final class PublishOnSubscriber<T>
 			implements QueueSubscription<T>, Runnable, InnerOperator<T, T> {
 
@@ -121,6 +139,10 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 
 		final Scheduler scheduler;
 
+		/**
+		 * worker 相比 scheduler 更轻量级 scheduler 内部为了提供并发度 可能会设置多个线程池
+		 * 而 worker 对应执行任务的一个线程池
+		 */
 		final Worker worker;
 
 		final boolean delayError;
@@ -162,7 +184,7 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 				Worker worker,
 				boolean delayError,
 				int prefetch,
-				int lowTide,
+				int lowTide,   //  限制上游数据发射的速度的2个指标  这个是下限
 				Supplier<? extends Queue<T>> queueSupplier) {
 			this.actual = actual;
 			this.worker = worker;
@@ -173,6 +195,10 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			this.limit = Operators.unboundedOrLimit(prefetch, lowTide);
 		}
 
+		/**
+		 * 将上游数据 与该对象结合生成 subscription 并下发
+		 * @param s
+		 */
 		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
@@ -206,12 +232,15 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 
 				queue = queueSupplier.get();
 
+				// 触发本对象的 request
 				actual.onSubscribe(this);
 
+				// 拉取上游数据  请求的数量实际上比 limit 大一点
 				s.request(Operators.unboundedOrPrefetch(prefetch));
 			}
 		}
 
+		// 当上游的数据下发
 		@Override
 		public void onNext(T t) {
 			if (sourceMode == ASYNC) {
@@ -229,9 +258,15 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 						t, actual.currentContext());
 				done = true;
 			}
+			// 接收到的数据没有直接发送到下游 而是尝试使用 worker 进行发送
 			trySchedule(this, null, t);
 		}
 
+		/**
+		 * 当出现异常时 往队列中插入一个 null 同时在 异步任务中 如果从队列中拉取到了null 会直接触发下游的 onComplete
+		 * 因为 在上游线程没有与下游线程做协调的时候 不能直接停止下游的任务 这里null 就作为一个特殊标识
+		 * @param t
+		 */
 		@Override
 		public void onError(Throwable t) {
 			if (done) {
@@ -243,6 +278,9 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			trySchedule(null, t, null);
 		}
 
+		/**
+		 * 思路同上
+		 */
 		@Override
 		public void onComplete() {
 			if (done) {
@@ -262,6 +300,9 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			}
 		}
 
+		/**
+		 * 这里会设置 cancelled 标识
+		 */
 		@Override
 		public void cancel() {
 			if (cancelled) {
@@ -277,14 +318,22 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			}
 		}
 
+		/**
+		 * 尝试异步将某个数据下发
+		 * @param subscription
+		 * @param suppressed
+		 * @param dataSignal
+		 */
 		void trySchedule(
-				@Nullable Subscription subscription,
+				@Nullable Subscription subscription, // 本对象
 				@Nullable Throwable suppressed,
-				@Nullable Object dataSignal) {
+				@Nullable Object dataSignal  // 下发的数据
+		) {
 			if (WIP.getAndIncrement(this) != 0) {
 				return;
 			}
 
+			// 通过调度器 执行异步任务  不过 immediateScheduler 返回的对象 只会在当前线程执行任务
 			try {
 				worker.schedule(this);
 			}
@@ -295,6 +344,9 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			}
 		}
 
+		/**
+		 * 同步模式 拉取数据到下游
+		 */
 		void runSync() {
 			int missed = 1;
 
@@ -303,6 +355,7 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 
 			long e = produced;
 
+			// 这里就是个 loop 直到 上游跟不上下游的消费速度 或者 上游数据发送完
 			for (; ; ) {
 
 				long r = requested;
@@ -319,6 +372,7 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 						return;
 					}
 
+					// 关闭的话 连 onComplete 也不会触发
 					if (cancelled) {
 						Operators.onDiscardQueueWithClear(q, actual.currentContext(), null);
 						return;
@@ -357,6 +411,9 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			}
 		}
 
+		/**
+		 * 异步执行该任务
+		 */
 		void runAsync() {
 			int missed = 1;
 
@@ -391,10 +448,12 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 						return;
 					}
 
+					// 拉取不到数据 跳过本次loop
 					if (empty) {
 						break;
 					}
 
+					// 正常拉取到数据的情况 触发下游的 onNext()
 					a.onNext(v);
 
 					e++;
@@ -481,6 +540,7 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 				runSync();
 			}
 			else {
+				// 默认情况走这里
 				runAsync();
 			}
 		}
@@ -765,10 +825,14 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			}
 		}
 
+		/**
+		 * 在同步模式下 下发数据
+		 */
 		void runSync() {
 			int missed = 1;
 
 			final ConditionalSubscriber<? super T> a = actual;
+			// onNext 的数据都存放在 queue 中
 			final Queue<T> q = queue;
 
 			long e = produced;
@@ -792,11 +856,13 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 						Operators.onDiscardQueueWithClear(q, actual.currentContext(), null);
 						return;
 					}
+					// 因为 一次onNext 对应一次runSync 如果 queue 没有拉到数据 就是上游数据处理完了
 					if (v == null) {
 						doComplete(a);
 						return;
 					}
 
+					// 将数据发射到下游
 					if (a.tryOnNext(v)) {
 						e++;
 					}
@@ -826,6 +892,9 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			}
 		}
 
+		/**
+		 * 代表在异步环境下发射数据
+		 */
 		void runAsync() {
 			int missed = 1;
 
@@ -869,6 +938,7 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 
 					polled++;
 
+					// 好像唯一的区别就是 它会自动拉取下一批数据
 					if (polled == limit) {
 						s.request(polled);
 						polled = 0L;
@@ -927,14 +997,19 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			}
 		}
 
+		/**
+		 * 当上游发射数据 并被接收到时 可以在这层做异步解耦
+		 */
 		@Override
 		public void run() {
 			if (outputFused) {
 				runBackfused();
 			}
+			// 如果是在同步模式下
 			else if (sourceMode == Fuseable.SYNC) {
 				runSync();
 			}
+			// 在异步模式下
 			else {
 				runAsync();
 			}
@@ -961,6 +1036,10 @@ final class FluxPublishOn<T> extends InternalFluxOperator<T, T> implements Fusea
 			return InnerOperator.super.scanUnsafe(key);
 		}
 
+		/**
+		 * 丢弃 worker 对象
+		 * @param a
+		 */
 		void doComplete(Subscriber<?> a) {
 			a.onComplete();
 			worker.dispose();

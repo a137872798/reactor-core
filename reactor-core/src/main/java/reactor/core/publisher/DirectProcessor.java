@@ -63,6 +63,7 @@ import reactor.util.annotation.Nullable;
  *      <b>Note: </b> If there are no Subscribers, upstream items are dropped and only
  *      the terminal events are retained. A terminated DirectProcessor will emit the
  *      terminal signal to late subscribers.
+ *      terminal signal to late subscribers.
  *
  *      <p>
  *         <img width="640" src="https://raw.githubusercontent.com/reactor/reactor-core/v3.2.0.M2/src/docs/marble/directprocessorterminal.png" alt="">
@@ -77,6 +78,8 @@ import reactor.util.annotation.Nullable;
  * </p>
  *
  * @param <T> the input and output value type
+ *           processor 内部同时包含一个pub 和多个 sub
+ *           用户需要直接通过 onNext 来向下游发射数据
  */
 public final class DirectProcessor<T> extends FluxProcessor<T, T> {
 
@@ -116,6 +119,10 @@ public final class DirectProcessor<T> extends FluxProcessor<T, T> {
 		return Integer.MAX_VALUE;
 	}
 
+	/**
+	 * 将 processor 作为 sub 时 订阅到某个pub 后会间接触发该方法
+	 * @param s
+	 */
 	@Override
 	public void onSubscribe(Subscription s) {
 		Objects.requireNonNull(s, "s");
@@ -127,6 +134,10 @@ public final class DirectProcessor<T> extends FluxProcessor<T, T> {
 		}
 	}
 
+	/**
+	 * 当该对象作为订阅者时 接收上游数据 会同时让内部多个订阅者都接收数据
+	 * @param t
+	 */
 	@Override
 	public void onNext(T t) {
 		Objects.requireNonNull(t, "t");
@@ -139,6 +150,7 @@ public final class DirectProcessor<T> extends FluxProcessor<T, T> {
 		}
 
 		for (DirectInner<T> s : inners) {
+			// 挨个往每个订阅者下发数据
 			s.onNext(t);
 		}
 	}
@@ -167,11 +179,17 @@ public final class DirectProcessor<T> extends FluxProcessor<T, T> {
 		}
 	}
 
+	/**
+	 * 该对象 与 DelegateProcessor 使用场景不一样 触发该对象的订阅方法 只会增加一个订阅对象到内部
+	 * DelegateProcessor 内部本身就有一个数据源 调用 subscribe() 只会将上游数据下发到新的订阅者
+	 * @param actual the {@link Subscriber} interested into the published sequence
+	 */
 	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		Objects.requireNonNull(actual, "subscribe");
 
 		DirectInner<T> p = new DirectInner<>(actual, this);
+		// 触发 p.request()
 		actual.onSubscribe(p);
 
 		if (add(p)) {
@@ -205,6 +223,11 @@ public final class DirectProcessor<T> extends FluxProcessor<T, T> {
 		return subscribers.length;
 	}
 
+	/**
+	 * 为 父对象添加一个 子对象
+	 * @param s
+	 * @return
+	 */
 	boolean add(DirectInner<T> s) {
 		DirectInner<T>[] a = subscribers;
 		if (a == TERMINATED) {
@@ -215,7 +238,7 @@ public final class DirectProcessor<T> extends FluxProcessor<T, T> {
 			a = subscribers;
 			if (a == TERMINATED) {
 				return false;
-			}
+			}a
 			int len = a.length;
 
 			@SuppressWarnings("unchecked") DirectInner<T>[] b = new DirectInner[len + 1];
@@ -281,6 +304,10 @@ public final class DirectProcessor<T> extends FluxProcessor<T, T> {
 		return null;
 	}
 
+	/**
+	 * 内部每个子订阅者对象
+	 * @param <T>
+	 */
 	static final class DirectInner<T> implements InnerProducer<T> {
 
 		final CoreSubscriber<? super T> actual;
@@ -306,6 +333,9 @@ public final class DirectProcessor<T> extends FluxProcessor<T, T> {
 			}
 		}
 
+		/**
+		 * 该 inner 对象关闭时 同时从parent 中移除
+		 */
 		@Override
 		public void cancel() {
 			if (!cancelled) {
